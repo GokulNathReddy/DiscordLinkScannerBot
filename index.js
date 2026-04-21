@@ -22,20 +22,23 @@ const client = new Client({
 client.once('ready', () => {
   console.log(`[system] Discord Security Bot is online! Logged in as ${client.user.tag}`);
   
-  // Array of statuses to rotate through with emojis
+  // Array of statuses to randomly rotate through
   const statuses = [
     { name: '🛡️ Scanning for threats', type: ActivityType.Watching },
     { name: '👀 Watching verkadala', type: ActivityType.Watching },
-    { name: '🔐 Protecting users', type: ActivityType.Watching }
+    { name: '🔐 Protecting users', type: ActivityType.Watching },
+    { name: '🥜 Roasting Verkadala...', type: ActivityType.Playing },
+    { name: '🐿️ Defending the peanuts!', type: ActivityType.Playing },
+    { name: '🥜 Crackin\' down on scams', type: ActivityType.Listening },
+    { name: '🛡️ Guarding the Verkadala stash', type: ActivityType.Watching },
+    { name: '👨‍💻 Never Sleeping', type: ActivityType.Playing },
+    { name: '👮 Kaaval thorai ungal nanbaan', type: ActivityType.Listening }
   ];
 
-  let i = 0;
-  // Note: Discord HARD limits status updates to 1 every 4 seconds. 
-  // If we set it to 1 second, Discord will just ignore the extra updates, 
-  // so 4 seconds is literally the fastest speed physically possible!
+  // Note: 4000ms is the absolute fastest Discord API limit before it drops requests.
   setInterval(() => {
-    client.user.setActivity(statuses[i].name, { type: statuses[i].type });
-    i = (i + 1) % statuses.length;
+    const randomIndex = Math.floor(Math.random() * statuses.length);
+    client.user.setActivity(statuses[randomIndex].name, { type: statuses[randomIndex].type });
   }, 4000); 
 });
 
