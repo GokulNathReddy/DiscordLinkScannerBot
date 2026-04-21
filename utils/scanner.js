@@ -51,6 +51,40 @@ async function scanPipeline(url) {
   const cached = cache.get(url);
   if (cached) return cached;
 
+  // --- 2.5 LIVENESS / DEAD LINK CHECK ---
+  // The user explicitly requested to kill 404s and invalid links.
+  try {
+    const axios = require('axios');
+    const res = await axios.head(url, { 
+      timeout: 5000, 
+      maxRedirects: 3,
+      validateStatus: () => true // Don't throw on status codes
+    });
+    
+    // We only explicitly execute on absolute dead signatures (404 Not Found)
+    // We ignore Cloudflare 403s, 503s etc., because they mean the domain exists.
+    if (res.status === 404) {
+      return {
+        safe: false,
+        reason: 'Dead Link (404 Not Found)',
+        note: null,
+        ipqsScore: null,
+        vtMalicious: null,
+        apiErrorContext: null
+      };
+    }
+  } catch (err) {
+    // Network errors like ENOTFOUND (fake domain), ECONNREFUSED, or timeouts
+    return {
+      safe: false,
+      reason: 'Invalid or Unreachable Domain',
+      note: null,
+      ipqsScore: null,
+      vtMalicious: null,
+      apiErrorContext: null
+    };
+  }
+
   // --- 3. Parallel API Execution (IPQS + VT) ---
   let ipqsPromise = checkIpqs(url).catch(e => e); // catch so Promise.all doesn't fail fast
   let vtPromise   = checkVt(url).catch(e => e);
