@@ -1,0 +1,20 @@
+{
+  "name": "discord-link-scanner-bot",
+  "version": "1.0.0",
+  "description": "A Discord security bot that scans URLs for phishing and malware using stop-discord-phishing, IPQualityScore, and VirusTotal.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "discord.js": "^14.15.3",
+    "dotenv": "^17.4.2",
+    "stop-discord-phishing": "^0.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}
