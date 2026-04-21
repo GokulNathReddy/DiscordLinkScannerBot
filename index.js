@@ -2,7 +2,7 @@
 //  index.js  —  Discord Security Bot Entry Point
 // ============================================================
 
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, ActivityType } = require('discord.js');
 const { config } = require('./config');
 const { handleMessage } = require('./handlers/messageHandler');
 const { handleCommand } = require('./handlers/commandHandler');
@@ -21,6 +21,22 @@ const client = new Client({
 
 client.once('ready', () => {
   console.log(`[system] Discord Security Bot is online! Logged in as ${client.user.tag}`);
+  
+  // Array of statuses to rotate through with emojis
+  const statuses = [
+    { name: '🛡️ Scanning for threats', type: ActivityType.Watching },
+    { name: '👀 Watching verkadala', type: ActivityType.Watching },
+    { name: '🔐 Protecting users', type: ActivityType.Watching }
+  ];
+
+  let i = 0;
+  // Note: Discord HARD limits status updates to 1 every 4 seconds. 
+  // If we set it to 1 second, Discord will just ignore the extra updates, 
+  // so 4 seconds is literally the fastest speed physically possible!
+  setInterval(() => {
+    client.user.setActivity(statuses[i].name, { type: statuses[i].type });
+    i = (i + 1) % statuses.length;
+  }, 4000); 
 });
 
 client.on('messageCreate', async (message) => {
