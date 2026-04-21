@@ -94,8 +94,8 @@ async function handleMessage(message) {
     // Attempt to grab the emoji to ensure formatting is perfect (animated vs static)
     let emojiStr = `<a:loading:1496156060539555870>`;
     try {
-      if (message.guild) {
-        const customEmoji = message.guild.emojis.cache.get('1496156060539555870');
+      if (message.client) {
+        const customEmoji = message.client.emojis.cache.get('1496156060539555870');
         if (customEmoji) {
           emojiStr = customEmoji.toString();
         } else {

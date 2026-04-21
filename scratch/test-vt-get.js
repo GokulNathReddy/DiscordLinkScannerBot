@@ -14,10 +14,10 @@ async function checkExisting(url) {
     const res = await axios.get(`https://www.virustotal.com/api/v3/urls/${id}`, {
       headers: { 'x-apikey': vtKey }
     });
-    console.log('Success!', res.data.data.attributes.last_analysis_stats);
+    console.log('Categories:', res.data.data.attributes.categories);
   } catch (e) {
     console.log('Error:', e.response?.data || e.message);
   }
 }
 
-checkExisting('https://github.com/');
+checkExisting('https://pornhub.com/');

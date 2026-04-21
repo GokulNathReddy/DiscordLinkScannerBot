@@ -135,12 +135,31 @@ async function scanPipeline(url) {
   // Assume safe initially. If ANY successful API flagged it, mark malicious.
   resultTemplate.safe = true; 
 
-  if (ipqsSuccess && !ipqsRes.safe) {
-    resultTemplate.safe = false;
-    resultTemplate.reason = 'IPQualityScore';
-  } else if (vtSuccess && !vtRes.safe) {
-    resultTemplate.safe = false;
-    resultTemplate.reason = 'VirusTotal';
+  if (ipqsSuccess) {
+    if (!ipqsRes.safe) {
+      resultTemplate.safe = false;
+      resultTemplate.reason = 'IPQualityScore';
+    } else if (ipqsRes.raw && ipqsRes.raw.adult === true) {
+      resultTemplate.safe = false;
+      resultTemplate.reason = 'Adult/NSFW Content';
+    }
+  } 
+  
+  if (resultTemplate.safe && vtSuccess) {
+    if (!vtRes.safe) {
+      resultTemplate.safe = false;
+      resultTemplate.reason = 'VirusTotal';
+    } else if (vtRes.raw && vtRes.raw.attributes && vtRes.raw.attributes.categories) {
+      // Extract all category values from VT's massive dataset
+      const categoriesStr = Object.values(vtRes.raw.attributes.categories).join(' ').toLowerCase();
+      const adultKeywords = ['adult', 'porn', 'sexually explicit', 'sex', 'x-rated', 'erotica', 'nsfw'];
+      
+      const isAdult = adultKeywords.some(kw => categoriesStr.includes(kw));
+      if (isAdult) {
+        resultTemplate.safe = false;
+        resultTemplate.reason = 'Adult/NSFW Content';
+      }
+    }
   }
 
   // Only cache if the URL is resolved securely (i.e. we got a definitive answer).
