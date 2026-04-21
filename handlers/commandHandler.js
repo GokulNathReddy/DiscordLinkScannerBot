@@ -21,8 +21,11 @@ async function handleCommand(message) {
     return false;
   }
 
-  // Check owner permissions
-  if (message.guild && message.guild.ownerId !== message.author.id) {
+  // Check permissions: Must be Owner OR have Administrator permission
+  const isOwner = message.guild && message.guild.ownerId === message.author.id;
+  const isAdmin = message.member?.permissions.has(require('discord.js').PermissionFlagsBits.Administrator);
+
+  if (message.guild && !isOwner && !isAdmin) {
     const msg = await message.reply('```bash\nPermission denied\n```');
     setTimeout(() => msg.delete().catch(() => {}), DENIAL_TIMEOUT);
     return true;
