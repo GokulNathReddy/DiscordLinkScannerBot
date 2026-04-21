@@ -6,7 +6,7 @@ module.exports = {
 
   apis: {
     ipqs: {
-      enabled: false,
+      enabled: true,
       apiKey: process.env.IPQS_API_KEY,
     },
     virustotal: {
