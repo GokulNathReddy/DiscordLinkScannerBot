@@ -113,8 +113,32 @@ async function pollAnalysis(analysisId, headers) {
 }
 
 /**
+ * Try to get existing analysis by base64url encoded URL.
+ * Costs only 1 request. Returns null if not found (404).
+ * @param {string} url
+ * @param {object} headers
+ */
+async function getExistingAnalysis(url, headers) {
+  const id = Buffer.from(url).toString('base64url');
+  try {
+    const res = await axios.get(`https://www.virustotal.com/api/v3/urls/${id}`, {
+      headers,
+      timeout: 10000,
+    });
+    return res.data.data;
+  } catch (error) {
+    if (error.response?.status === 404) return null;
+    if (error.response?.status === 429) {
+      throw new VtRateLimitError('VirusTotal Error 429: Quota exceeded.');
+    }
+    throw error;
+  }
+}
+
+/**
  * Check a URL using VirusTotal.
- * Queues the request automatically. Throws VtRateLimitError on 429.
+ * Tries existing reputation first to save quota. Queues the request automatically.
+ * Throws VtRateLimitError on 429.
  *
  * @param {string} url
  * @returns {Promise<VtResult>}
@@ -126,14 +150,17 @@ async function checkUrl(url) {
 
   const headers = { 'x-apikey': apis.virustotal.apiKey };
 
-  // Core execution step (queued to enforce rate limit)
   const execute = async () => {
-    // 1. Submit
-    const analysisId = await submitUrl(url, headers);
-    // 2. Poll
-    const finalData = await pollAnalysis(analysisId, headers);
+    // 1. Try to fetch existing analysis (fast, 1 quota)
+    let finalData = await getExistingAnalysis(url, headers);
     
-    const stats = finalData.attributes.stats;
+    // 2. If not found, submit new and poll (slow, multiple quota)
+    if (!finalData) {
+      const analysisId = await submitUrl(url, headers);
+      finalData = await pollAnalysis(analysisId, headers);
+    }
+    
+    const stats = finalData.attributes.last_analysis_stats || finalData.attributes.stats;
     const maliciousCount = stats.malicious || 0;
     const safe = maliciousCount === 0;
 
