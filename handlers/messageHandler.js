@@ -2,7 +2,7 @@
 //  handlers/messageHandler.js  —  Main message flow logic
 // ============================================================
 
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const { config } = require('../config');
 const { isDomainExcepted } = require('../utils/exceptions');
 const { scanPipeline } = require('../utils/scanner');
@@ -10,6 +10,9 @@ const { sendAsUser } = require('../utils/webhook');
 
 // Robust URL matching regex
 const URL_REGEX = /(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})/gi;
+
+// Discord Invite Regex
+const INVITE_REGEX = /(?:https?:\/\/)?(?:www\.)?(?:discord\.gg\/|discord\.com\/invite\/|discordapp\.com\/invite\/)([a-zA-Z0-9-]+)/i;
 
 /**
  * Handle incoming messages, extract links, scan, and re-send.
@@ -21,6 +24,38 @@ async function handleMessage(message) {
 
   const content = message.content;
   if (!content) return;
+
+  // --- NEW: Block promotional Discord Invites (including hacked scam invites) ---
+  if (INVITE_REGEX.test(content)) {
+    const isAdmin = message.member?.permissions.has(PermissionFlagsBits.Administrator);
+    if (!isAdmin) {
+      if (message.deletable) await message.delete().catch(() => {});
+      
+      try {
+        await message.author.send(`🚨 **Warning:** Promotional Discord server links and invites are not allowed in this server.`);
+      } catch (e) {}
+
+      // Log to mod channel
+      try {
+        const { logChannelId } = require('../config');
+        const logChannel = await message.client.channels.fetch(logChannelId);
+        if (logChannel && logChannel.isTextBased()) {
+          const embed = new EmbedBuilder()
+            .setColor('#ffae42')
+            .setTitle('🛡️ Discord Invite Blocked')
+            .setDescription(`Deleted a Discord invite link sent by a regular user.`)
+            .addFields(
+              { name: 'User', value: `${message.author} (ID: ${message.author.id})` },
+              { name: 'Message Content', value: `\`\`\`\n${content.substring(0, 1000)}\n\`\`\`` }
+            )
+            .setTimestamp();
+          await logChannel.send({ embeds: [embed] });
+        }
+      } catch (err) {}
+      
+      return; // Stop completely. Don't scan other links in the message.
+    }
+  }
 
   // Extract all URLs
   const rawUrls = content.match(URL_REGEX) || [];
