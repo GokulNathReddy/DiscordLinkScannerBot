@@ -32,7 +32,7 @@ client.once('ready', () => {
     { name: '🥜 Crackin\' down on scams', type: ActivityType.Listening },
     { name: '🛡️ Guarding the Verkadala stash', type: ActivityType.Watching },
     { name: '👨‍💻 Never Sleeping', type: ActivityType.Playing },
-    { name: '👮 Kaaval thorai ungal nanbaan', type: ActivityType.Listening }
+    { name: '👮 kavalthrai ungal nanban', type: ActivityType.Listening }
   ];
 
   // Note: 4000ms is the absolute fastest Discord API limit before it drops requests.
