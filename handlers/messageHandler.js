@@ -53,6 +53,29 @@ async function handleMessage(message) {
     console.error(`[messageHandler] Could not delete message from ${message.author.tag}:`, err.message);
   }
 
+  // Send the temporary "Scanning..." message with the loading bar
+  let tempMessage = null;
+  try {
+    // Attempt to grab the emoji to ensure formatting is perfect (animated vs static)
+    let emojiStr = `<a:loading:1496156060539555870>`;
+    try {
+      if (message.guild) {
+        const customEmoji = message.guild.emojis.cache.get('1496156060539555870');
+        if (customEmoji) {
+          emojiStr = customEmoji.toString();
+        } else {
+          // Fallback if not cached but standard static format might work
+          emojiStr = `<:loading:1496156060539555870>`;
+        }
+      }
+    } catch(e) {}
+    
+    const username = message.member?.displayName || message.author.username;
+    tempMessage = await message.channel.send(`**${username}** sent a link... ${emojiStr} *Scanning for threats...*`);
+  } catch (err) {
+    console.error(`[messageHandler] Could not send temp loading message:`, err.message);
+  }
+
   // 3. RUN SCANS IN PARALLEL
   // Map urls to promises resolving to { url, scanRes }
   const scanPromises = urlsToScan.map(async (url) => {
@@ -61,6 +84,13 @@ async function handleMessage(message) {
   });
 
   const scanResults = await Promise.all(scanPromises);
+
+  // Delete the placeholder loading message
+  if (tempMessage && tempMessage.deletable) {
+    try {
+      await tempMessage.delete();
+    } catch (err) {}
+  }
 
   // Check if ANY URL is malicious or if BOTH APIs failed completely on a URL.
   const maliciousResults = scanResults.filter((item) => !item.scanRes.safe);
