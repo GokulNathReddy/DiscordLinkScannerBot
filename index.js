@@ -42,7 +42,7 @@ process.on('uncaughtException', (err) => {
 });
 
 if (!configData.token || configData.token === 'YOUR_BOT_TOKEN') {
-  console.error('[system] ERROR: You must replace "YOUR_BOT_TOKEN" in config.js with your actual bot token.');
+  console.error('[system] ERROR: Missing DISCORD_BOT_TOKEN. If hosting on Railway, please add DISCORD_BOT_TOKEN in the "Variables" tab of your Railway project dashboard.');
   process.exit(1);
 }
 
