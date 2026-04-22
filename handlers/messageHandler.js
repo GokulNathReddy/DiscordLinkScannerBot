@@ -106,7 +106,7 @@ async function handleMessage(message) {
     } catch(e) {}
     
     const username = message.member?.displayName || message.author.username;
-    tempMessage = await message.channel.send(`**${username}** sent a link... ${emojiStr} *Initializing scan...*`);
+    tempMessage = await message.channel.send(`**${username}** sent a link... ${emojiStr} *Scanning for threats...*`);
   } catch (err) {
     console.error(`[messageHandler] Could not send temp loading message:`, err.message);
   }
@@ -118,35 +118,7 @@ async function handleMessage(message) {
     return { url, scanRes };
   });
 
-  // Futuristic loading bar sequence to make the bot feel "alive" and highly technical
-  const loadingSteps = [
-    `\`[▓░░░░░░░░░]\` *Initiating Cyber Threat Analysis...*`,
-    `\`[▓▓▓░░░░░░░]\` *Querying Global Threat Signatures...*`,
-    `\`[▓▓▓▓▓░░░░░]\` *Verifying SSL/TLS & Domain Telemetry...*`,
-    `\`[▓▓▓▓▓▓▓░░░]\` *Injecting payload to VirusTotal Neural Net...*`,
-    `\`[▓▓▓▓▓▓▓▓▓░]\` *Cross-referencing Zero-Day exploits...*`,
-    `\`[▓▓▓▓▓▓▓▓▓▓]\` *Finalizing security protocols...*`
-  ];
-
-  const animateLoading = async () => {
-    if (!tempMessage) return;
-    for (let i = 0; i < loadingSteps.length; i++) {
-      try {
-        await tempMessage.edit({ content: `**${username}** sent a link... ${emojiStr}\n> ${loadingSteps[i]}` });
-        // Wait 1.5 seconds between steps for maximum visual effect
-        await new Promise(r => setTimeout(r, 1500));
-      } catch (err) {
-        console.error(`[messageHandler] Animation error:`, err.message);
-        break;
-      }
-    }
-  };
-
-  // Run the animation and the scans concurrently
-  const [scanResults] = await Promise.all([
-    Promise.all(scanPromises),
-    animateLoading()
-  ]);
+  const scanResults = await Promise.all(scanPromises);
 
   // Delete the placeholder loading message
   if (tempMessage && tempMessage.deletable) {
@@ -175,19 +147,12 @@ async function handleMessage(message) {
     linesToSend.push(url);
   }
 
-  // Safe scanned URLs go next, labeled with detail
+  // Safe scanned URLs go next, labeled "✅ Safe"
   for (const item of scanResults) {
-    let apisUsed = [];
-    if (item.scanRes.ipqsScore !== null) apisUsed.push('IPQualityScore');
-    if (item.scanRes.vtMalicious !== null) apisUsed.push('VirusTotal');
-    
-    let verifiedStr = apisUsed.length > 0 ? `Verified by ${apisUsed.join(' & ')}` : `Verified securely`;
-    
-    let line = `${item.url} - ✅ **Safe** (${verifiedStr})`;
-    
+    let line = `${item.url} ✅ Safe`;
     // If one API backed up the other, indicate it via note
     if (item.scanRes.note) {
-      line += `\n*Note: ${item.scanRes.note}*`;
+      line += ` (${item.scanRes.note})`;
     }
     linesToSend.push(line);
   }

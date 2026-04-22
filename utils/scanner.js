@@ -20,8 +20,6 @@ const { config } = require('../config'); // used for checking enablement in lowe
  * @property {string|null} apiErrorContext - String detailing which APIs failed if any
  */
 
-
-
 /**
  * Run a URL through the full security pipeline.
  *
@@ -51,9 +49,7 @@ async function scanPipeline(url) {
 
   // --- 2. CACHE ---
   const cached = cache.get(url);
-  if (cached) {
-    return cached;
-  }
+  if (cached) return cached;
 
   // --- 2.5 LIVENESS / DEAD LINK CHECK ---
   // The user explicitly requested to kill 404s and invalid links.
