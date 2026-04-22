@@ -10,3 +10,5 @@ discord.gg
 imgur.com
 kkinstagram.com
 cdn.discordapp.com
+media.tenor.com
+c.tenor.com
