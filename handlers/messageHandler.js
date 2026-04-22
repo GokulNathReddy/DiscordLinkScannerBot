@@ -6,6 +6,7 @@ const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const { config } = require('../config');
 const { isDomainExcepted } = require('../utils/exceptions');
 const { scanPipeline } = require('../utils/scanner');
+const { classifyAttachment, scanFilePipeline } = require('../utils/fileScanner');
 const { sendAsUser } = require('../utils/webhook');
 
 // Robust URL matching regex
@@ -56,6 +57,88 @@ async function handleMessage(message) {
       return; // Stop completely. Don't scan other links in the message.
     }
   }
+
+  // ── ATTACHMENT SCANNING ──────────────────────────────────────
+  const attachments = [...message.attachments.values()];
+  const attachmentsToScan = attachments.filter(a => classifyAttachment(a).action === 'scan');
+
+  if (attachmentsToScan.length > 0) {
+    // Delete the original message immediately
+    try {
+      if (message.deletable) await message.delete();
+    } catch (err) {}
+
+    const username = message.member?.displayName || message.author.username;
+    let emojiStr = `<a:loading:1496156060539555870>`;
+    try {
+      const customEmoji = message.client.emojis.cache.get('1496156060539555870');
+      if (customEmoji) emojiStr = customEmoji.toString();
+    } catch(e) {}
+
+    const statusLine = (text) => `**${username}** sent a file... ${emojiStr} *${text}*`;
+    let fileTempMsg = null;
+
+    try {
+      fileTempMsg = await message.channel.send(statusLine('Initiating malware scan...'));
+    } catch(e) {}
+
+    const updateFileStatus = async (text) => {
+      if (!fileTempMsg) return;
+      try { await fileTempMsg.edit(statusLine(text)); } catch(e) {}
+    };
+
+    for (const attachment of attachmentsToScan) {
+      let scanResult;
+      try {
+        scanResult = await scanFilePipeline(attachment, updateFileStatus);
+      } catch (err) {
+        console.error(`[messageHandler] File scan error for ${attachment.name}:`, err.message);
+        // API failure — block and alert mods
+        await handleMaliciousFile(message, attachment, { 
+          safe: false, 
+          maliciousCount: 0, 
+          method: 'error',
+          error: err.message 
+        });
+        if (fileTempMsg?.deletable) await fileTempMsg.delete().catch(() => {});
+        return;
+      }
+
+      if (!scanResult.safe) {
+        if (fileTempMsg?.deletable) await fileTempMsg.delete().catch(() => {});
+        await handleMaliciousFile(message, attachment, scanResult);
+        return;
+      }
+    }
+
+    // All files clean — delete status msg and re-send via webhook
+    if (fileTempMsg?.deletable) await fileTempMsg.delete().catch(() => {});
+
+    try {
+      // Re-send clean files as the user via webhook
+      // We send the original message content + attachments
+      const webhookContent = content || null;
+      const { getOrCreateWebhook } = require('../utils/webhook');
+      const webhook = await getOrCreateWebhook(message.channel);
+      if (webhook) {
+        const member = message.member || message.author;
+        await webhook.send({
+          content: webhookContent ? `${webhookContent}\n✅ File scanned — clean` : '✅ File scanned — clean',
+          username: member.displayName || message.author.username,
+          avatarURL: message.author.displayAvatarURL(),
+          files: attachmentsToScan.map(a => ({ attachment: a.url, name: a.name })),
+        });
+      }
+    } catch (err) {
+      console.error(`[messageHandler] Failed to re-send clean file:`, err.message);
+    }
+
+    // If there are also URLs in this message, fall through and scan them too
+    // But if it's attachment-only, return here
+    const rawUrlsCheck = content.match(URL_REGEX) || [];
+    if (rawUrlsCheck.length === 0) return;
+  }
+  // ── END ATTACHMENT SCANNING ───────────────────────────────────
 
   // Extract all URLs
   const rawUrls = content.match(URL_REGEX) || [];
@@ -233,6 +316,51 @@ async function handleMaliciousOrFailedUrl(message, url, res) {
   } catch (err) {
     // If fetching the log channel fails, we at least blocked it successfully above
     console.error(`[messageHandler] Could not send log to channel ID ${logChannelId}:`, err.message);
+  }
+}
+
+/**
+ * Handle a file that was flagged as malicious or failed scanning.
+ */
+async function handleMaliciousFile(message, attachment, scanResult) {
+  const { logChannelId } = require('../config');
+  const embed = new EmbedBuilder().setTimestamp();
+
+  if (scanResult.method === 'error') {
+    embed
+      .setColor('#ff9900')
+      .setTitle('⚠️ FILE UNVERIFIED — Scanner Error')
+      .setDescription(`**Mods: Please review this file manually.**\nScanner error — file blocked for safety.`)
+      .addFields(
+        { name: 'User', value: `${message.author} (ID: ${message.author.id})` },
+        { name: 'File', value: `\`${attachment.name}\` (${(attachment.size / 1024).toFixed(1)} KB)` },
+        { name: 'Error', value: scanResult.error || 'Unknown error' }
+      );
+
+    try {
+      await message.author.send(`⚠️ Your file in **${message.guild.name}** was removed because our malware scanner encountered an error. Please try again later or contact a mod.`);
+    } catch(e) {}
+  } else {
+    embed
+      .setColor('#ff0000')
+      .setTitle('🚨 Malicious File Blocked')
+      .addFields(
+        { name: 'User', value: `${message.author} (ID: ${message.author.id})` },
+        { name: 'File', value: `\`${attachment.name}\` (${(attachment.size / 1024).toFixed(1)} KB)` },
+        { name: 'VT Malicious Engines', value: `${scanResult.maliciousCount}`, inline: true },
+        { name: 'Scan Method', value: scanResult.method === 'hash-lookup' ? 'Hash Reputation' : 'Full Sandbox', inline: true }
+      );
+
+    try {
+      await message.author.send(`🚨 **Warning:** Your file \`${attachment.name}\` in **${message.guild.name}** was flagged as malicious by **${scanResult.maliciousCount}** antivirus engine(s) and has been removed.`);
+    } catch(e) {}
+  }
+
+  try {
+    const logChannel = await message.client.channels.fetch(logChannelId);
+    if (logChannel?.isTextBased()) await logChannel.send({ embeds: [embed] });
+  } catch(err) {
+    console.error(`[messageHandler] Could not log malicious file to channel:`, err.message);
   }
 }
 
