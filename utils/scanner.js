@@ -37,8 +37,8 @@ const delay = (ms) => new Promise(r => setTimeout(r, ms));
 async function scanPipeline(url, onProgress) {
   // --- 1. LOCAL CHECK (stop-discord-phishing) ---
   if (onProgress) {
-    await onProgress('*Checking local databases...*');
-    await delay(800); // Visual delay for effect
+    await onProgress('*Checking local phishing databases...*');
+    await delay(1000); // Visual delay for effect
   }
   // Using true for strict mode checking both phishing and suspicious.
   const isSpam = await stopPhishing.checkMessage(url, true);
@@ -57,8 +57,8 @@ async function scanPipeline(url, onProgress) {
   const cached = cache.get(url);
   if (cached) {
     if (onProgress) {
-      await onProgress('*Loaded result from secure cache...*');
-      await delay(600);
+      await onProgress('*Loading VirusTotal & IPQualityScore result from cache...*');
+      await delay(1200);
     }
     return cached;
   }
@@ -66,8 +66,8 @@ async function scanPipeline(url, onProgress) {
   // --- 2.5 LIVENESS / DEAD LINK CHECK ---
   // The user explicitly requested to kill 404s and invalid links.
   if (onProgress) {
-    await onProgress('*Verifying link liveness...*');
-    await delay(600);
+    await onProgress('*Verifying secure link liveness...*');
+    await delay(1000);
   }
   try {
     const axios = require('axios');
@@ -104,7 +104,7 @@ async function scanPipeline(url, onProgress) {
   // --- 3. Parallel API Execution (IPQS + VT) ---
   if (onProgress) {
     await onProgress('*Starting VirusTotal & IPQualityScore analysis...*');
-    await delay(800);
+    await delay(1500);
   }
   let ipqsPromise = checkIpqs(url).catch(e => e); // catch so Promise.all doesn't fail fast
   let vtPromise   = checkVt(url).catch(e => e);

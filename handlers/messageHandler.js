@@ -113,11 +113,13 @@ async function handleMessage(message) {
 
   // 3. RUN SCANS IN PARALLEL
   let progressCallback = undefined;
-  if (urlsToScan.length === 1 && tempMessage) {
+  if (tempMessage) {
     progressCallback = async (status) => {
       try {
         await tempMessage.edit(`**${username}** sent a link... ${emojiStr} ${status}`);
-      } catch (err) {}
+      } catch (err) {
+        console.error(`[messageHandler] Error updating progress:`, err.message);
+      }
     };
   }
 
