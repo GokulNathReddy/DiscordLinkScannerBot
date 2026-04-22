@@ -21,7 +21,7 @@ const SKIP_EXTENSIONS = new Set([
   'mp3','wav','ogg','flac','aac','m4a','opus','wma','aiff','mid','midi',
 ]);
 
-const VT_DELAY_MS = 15000;
+const VT_DELAY_MS = 0; // Disabled artificial delay to speed up scans
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 /** Global VT queue tail (shared concept with url scanner, separate chain here) */
@@ -36,7 +36,7 @@ function enqueueFile(fn) {
         } catch (err) {
           reject(err);
         }
-        await sleep(VT_DELAY_MS);
+        if (VT_DELAY_MS > 0) await sleep(VT_DELAY_MS);
       })
       .catch(err => console.error('[fileScanner] queue error:', err));
   });

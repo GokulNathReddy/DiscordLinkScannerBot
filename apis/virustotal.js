@@ -7,8 +7,8 @@ const axios = require('axios');
 const { apis } = require('../config');
 
 // VT Public API is strictly limited to 4 requests/minute.
-// 15000ms delay between POST operations ensures we never exceed this.
-const VT_DELAY_MS = 15000;
+// 0ms delay: we rely on VT Rate Limit Error fallback (IPQS handles load if VT limits)
+const VT_DELAY_MS = 0;
 
 class VtRateLimitError extends Error {
   constructor(message) {
@@ -17,7 +17,7 @@ class VtRateLimitError extends Error {
   }
 }
 
-/** Global promise chain used to enforce the 15s delay. */
+/** Global promise chain used to enforce queueing if delay is > 0. */
 let queueTail = Promise.resolve();
 
 /** Pause execution for ms milliseconds */
@@ -31,8 +31,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  */
 
 /**
- * Enqueue a function to run strictly after previous queued functions
- * with a mandatory 15s delay to satisfy VT 4/min limits.
+ * Enqueue a function to run strictly after previous queued functions.
  *
  * @param {() => Promise<any>} fn
  * @returns {Promise<any>}
@@ -47,8 +46,7 @@ function enqueue(fn) {
         } catch (err) {
           reject(err);
         }
-        // Force the 15s cooldown after the function completes (successfully or not).
-        await sleep(VT_DELAY_MS);
+        if (VT_DELAY_MS > 0) await sleep(VT_DELAY_MS);
       })
       .catch((err) => {
         // Should not happen, errors are caught above
