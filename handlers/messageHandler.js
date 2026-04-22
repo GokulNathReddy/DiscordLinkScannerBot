@@ -121,9 +121,16 @@ async function handleMessage(message) {
     tempMessage = await message.channel.send(statusLine('Initiating threat scan...'));
   } catch (err) {}
 
-  const updateStatus = async (text) => {
+  // Fire-and-forget status updates. Awaiting these causes Discord edit rate limits to severely choke the scanning speed.
+  let lastUpdate = 0;
+  const updateStatus = (text) => {
     if (!tempMessage) return;
-    try { await tempMessage.edit(statusLine(text)); } catch(e) {}
+    const now = Date.now();
+    // Discord heavily rate limits message edits (max 5 per 5s).
+    // Throttle local updates to roughly 1 per 500ms to prevent 429 explosions, and never block the main thread.
+    if (now - lastUpdate < 500) return; 
+    lastUpdate = now;
+    tempMessage.edit(statusLine(text)).catch(() => {});
   };
 
   // 1. RUN FILE SCANS
