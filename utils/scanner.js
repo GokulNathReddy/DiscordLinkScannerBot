@@ -32,9 +32,9 @@ const { config } = require('../config'); // used for checking enablement in lowe
  * @param {string} url
  * @returns {Promise<ScanResult>}
  */
-async function scanPipeline(url) {
+async function scanPipeline(url, updateStatus = async () => {}) {
   // --- 1. LOCAL CHECK (stop-discord-phishing) ---
-  // Using true for strict mode checking both phishing and suspicious.
+  await updateStatus('Cross-referencing phishing blocklists...');
   const isSpam = await stopPhishing.checkMessage(url, true);
   if (isSpam) {
     return {
@@ -49,20 +49,21 @@ async function scanPipeline(url) {
 
   // --- 2. CACHE ---
   const cached = cache.get(url);
-  if (cached) return cached;
+  if (cached) {
+    await updateStatus('Cache hit — retrieving prior scan results...');
+    return cached;
+  }
 
   // --- 2.5 LIVENESS / DEAD LINK CHECK ---
-  // The user explicitly requested to kill 404s and invalid links.
+  await updateStatus('Resolving domain & checking link reachability...');
   try {
     const axios = require('axios');
     const res = await axios.head(url, { 
       timeout: 5000, 
       maxRedirects: 3,
-      validateStatus: () => true // Don't throw on status codes
+      validateStatus: () => true
     });
     
-    // We only explicitly execute on absolute dead signatures (404 Not Found)
-    // We ignore Cloudflare 403s, 503s etc., because they mean the domain exists.
     if (res.status === 404) {
       return {
         safe: false,
@@ -74,7 +75,6 @@ async function scanPipeline(url) {
       };
     }
   } catch (err) {
-    // Network errors like ENOTFOUND (fake domain), ECONNREFUSED, or timeouts
     return {
       safe: false,
       reason: 'Invalid or Unreachable Domain',
@@ -86,10 +86,21 @@ async function scanPipeline(url) {
   }
 
   // --- 3. Parallel API Execution (IPQS + VT) ---
-  let ipqsPromise = checkIpqs(url).catch(e => e); // catch so Promise.all doesn't fail fast
+  await updateStatus('Querying IPQualityScore & VirusTotal engines...');
+  let ipqsPromise = checkIpqs(url).catch(e => e);
   let vtPromise   = checkVt(url).catch(e => e);
 
+  // Fire status updates as each API resolves
+  ipqsPromise.then(r => {
+    if (!(r instanceof Error)) updateStatus('IPQualityScore responded — awaiting VirusTotal...');
+  }).catch(() => {});
+
+  vtPromise.then(r => {
+    if (!(r instanceof Error)) updateStatus('VirusTotal responded — analysing threat report...');
+  }).catch(() => {});
+
   const [ipqsRes, vtRes] = await Promise.all([ipqsPromise, vtPromise]);
+  await updateStatus('Compiling threat intelligence report...');
 
   const ipqsSuccess = !(ipqsRes instanceof Error);
   const vtSuccess   = !(vtRes instanceof Error);

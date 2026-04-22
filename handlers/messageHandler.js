@@ -88,33 +88,39 @@ async function handleMessage(message) {
     console.error(`[messageHandler] Could not delete message from ${message.author.tag}:`, err.message);
   }
 
-  // Send the temporary "Scanning..." message with the loading bar
+  // Resolve loading emoji
+  let emojiStr = `<a:loading:1496156060539555870>`;
+  try {
+    if (message.client) {
+      const customEmoji = message.client.emojis.cache.get('1496156060539555870');
+      if (customEmoji) emojiStr = customEmoji.toString();
+    }
+  } catch(e) {}
+
+  const username = message.member?.displayName || message.author.username;
+
+  // Helper to build a status line
+  const statusLine = (text) => `**${username}** sent a link... ${emojiStr} *${text}*`;
+
+  // Send the initial loading message
   let tempMessage = null;
   try {
-    // Attempt to grab the emoji to ensure formatting is perfect (animated vs static)
-    let emojiStr = `<a:loading:1496156060539555870>`;
-    try {
-      if (message.client) {
-        const customEmoji = message.client.emojis.cache.get('1496156060539555870');
-        if (customEmoji) {
-          emojiStr = customEmoji.toString();
-        } else {
-          // Fallback if not cached but standard static format might work
-          emojiStr = `<:loading:1496156060539555870>`;
-        }
-      }
-    } catch(e) {}
-    
-    const username = message.member?.displayName || message.author.username;
-    tempMessage = await message.channel.send(`**${username}** sent a link... ${emojiStr} *Scanning for threats...*`);
+    tempMessage = await message.channel.send(statusLine('Initiating threat scan...'));
   } catch (err) {
     console.error(`[messageHandler] Could not send temp loading message:`, err.message);
   }
 
-  // 3. RUN SCANS IN PARALLEL
-  // Map urls to promises resolving to { url, scanRes }
+  // Helper to silently edit the status message
+  const updateStatus = async (text) => {
+    if (!tempMessage) return;
+    try { await tempMessage.edit(statusLine(text)); } catch(e) {}
+  };
+
+  // 3. RUN SCANS — step-by-step with live status updates
+  await updateStatus('Checking phishing databases...');
+
   const scanPromises = urlsToScan.map(async (url) => {
-    const scanRes = await scanPipeline(url);
+    const scanRes = await scanPipeline(url, updateStatus);
     return { url, scanRes };
   });
 
