@@ -54,20 +54,28 @@ async function getOrCreateWebhook(channel) {
  * @param {import('discord.js').TextChannel} channel
  * @param {import('discord.js').GuildMember} member  - The original message author
  * @param {string[]} lines  - Each string is one URL line (with optional label)
+ * @param {string} originalContent - The original message text
+ * @param {Array} files - Array of objects with file URLs / names to re-attach
  * @returns {Promise<void>}
  */
-async function sendAsUser(channel, member, lines) {
+async function sendAsUser(channel, member, lines, originalContent = '', files = []) {
   const webhookClient = await getOrCreateWebhook(channel);
 
-  const content = lines.join('\n');
+  // Combine original content and the scan summaries
+  let finalContent = originalContent;
+  if (lines && lines.length > 0) {
+    finalContent += `\n\n🛡️ **Verified Safe:**\n${lines.join('\n')}`;
+  }
+
   const username  = member.displayName || member.user.username;
   const avatarURL = member.user.displayAvatarURL({ extension: 'png', size: 256 });
 
   await webhookClient.send({
-    content,
+    content: finalContent.trim() || undefined,
     username,
     avatarURL,
     allowedMentions: { parse: [] }, // Never ping anyone
+    files: files
   });
 }
 

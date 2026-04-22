@@ -23,8 +23,7 @@ async function handleMessage(message) {
   // Never process bots or webhooks
   if (message.author.bot || message.webhookId) return;
 
-  const content = message.content;
-  if (!content) return;
+  const content = message.content || "";
 
   // --- NEW: Block promotional Discord Invites (including hacked scam invites) ---
   if (INVITE_REGEX.test(content)) {
@@ -59,114 +58,13 @@ async function handleMessage(message) {
   }
 
   // ── ATTACHMENT SCANNING ──────────────────────────────────────
-  const attachments = [...message.attachments.values()];
-  const attachmentsToScan = attachments.filter(a => classifyAttachment(a).action === 'scan');
+  const allAttachments = [...message.attachments.values()];
+  const attachmentsToScan = allAttachments.filter(a => classifyAttachment(a).action === 'scan');
+  const safeAttachments = allAttachments.filter(a => classifyAttachment(a).action === 'ignore');
 
-  if (attachmentsToScan.length > 0) {
-    // Delete the original message immediately
-    try {
-      if (message.deletable) await message.delete();
-    } catch (err) {}
-
-    const username = message.member?.displayName || message.author.username;
-    let emojiStr = `<a:loading:1496156060539555870>`;
-    try {
-      const customEmoji = message.client.emojis.cache.get('1496156060539555870');
-      if (customEmoji) emojiStr = customEmoji.toString();
-    } catch(e) {}
-
-    const statusLine = (text) => `**${username}** sent a file... ${emojiStr} *${text}*`;
-    let fileTempMsg = null;
-
-    try {
-      fileTempMsg = await message.channel.send(statusLine('Initiating malware scan...'));
-    } catch(e) {}
-
-    const updateFileStatus = async (text) => {
-      if (!fileTempMsg) return;
-      try { await fileTempMsg.edit(statusLine(text)); } catch(e) {}
-    };
-
-    for (const attachment of attachmentsToScan) {
-      let scanResult;
-      try {
-        scanResult = await scanFilePipeline(attachment, updateFileStatus);
-      } catch (err) {
-        console.error(`[messageHandler] File scan error for ${attachment.name}:`, err.message);
-        // API failure — block and alert mods
-        await handleMaliciousFile(message, attachment, { 
-          safe: false, 
-          maliciousCount: 0, 
-          method: 'error',
-          error: err.message 
-        });
-        if (fileTempMsg?.deletable) await fileTempMsg.delete().catch(() => {});
-        return;
-      }
-
-      if (!scanResult.safe) {
-        if (fileTempMsg?.deletable) await fileTempMsg.delete().catch(() => {});
-        await handleMaliciousFile(message, attachment, scanResult);
-        return;
-      }
-    }
-
-    // All files clean — delete status msg and re-send via webhook
-    if (fileTempMsg?.deletable) await fileTempMsg.delete().catch(() => {});
-
-    try {
-      const webhookContent = content || null;
-      const { getOrCreateWebhook } = require('../utils/webhook');
-      const webhook = await getOrCreateWebhook(message.channel);
-      if (webhook) {
-        const member = message.member || message.author;
-        await webhook.send({
-          content: webhookContent ? `${webhookContent}\n✅ File scanned — clean` : '✅ File scanned — clean',
-          username: member.displayName || message.author.username,
-          avatarURL: message.author.displayAvatarURL(),
-          files: attachmentsToScan.map(a => ({ attachment: a.url, name: a.name })),
-        });
-      }
-    } catch (err) {
-      console.error('[messageHandler] Failed to re-send clean file:', err.message);
-    }
-
-    // Log clean scan to mod log
-    try {
-      const { logChannelId } = require('../config');
-      const logChannel = await message.client.channels.fetch(logChannelId);
-      if (logChannel?.isTextBased()) {
-        const cleanEmbed = new EmbedBuilder()
-          .setColor('#00cc66')
-          .setTitle('✅ File Scan — Clean')
-          .setTimestamp()
-          .addFields(
-            { name: '👤 User', value: `${message.author} (${message.author.tag})\nID: \`${message.author.id}\``, inline: true },
-            { name: '📁 File(s)', value: attachmentsToScan.map(a => {
-                const ext = (a.name || '').split('.').pop().toUpperCase() || 'UNKNOWN';
-                return `\`${a.name}\` · ${(a.size/1024).toFixed(1)} KB · \`${ext}\``;
-              }).join('\n'), inline: true },
-            { name: '📍 Channel', value: `<#${message.channelId}>`, inline: true },
-            { name: '🕐 Scanned At', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
-          )
-          .setFooter({ text: 'File Scanner · No threats detected' });
-        await logChannel.send({ embeds: [cleanEmbed] });
-      }
-    } catch(err) {}
-
-    // If there are also URLs in this message, fall through and scan them too
-    const rawUrlsCheck = content.match(URL_REGEX) || [];
-    if (rawUrlsCheck.length === 0) return;
-  }
-  // ── END ATTACHMENT SCANNING ───────────────────────────────────
-
-  // Extract all URLs
+  // Extract text URLs
   const rawUrls = content.match(URL_REGEX) || [];
-  if (rawUrls.length === 0) return; // No URLs, totally ignore message
-  
-  // Deduplicate matched URLs
   const allUrls = [...new Set(rawUrls)];
-
   const exceptedUrls = [];
   const urlsToScan = [];
 
@@ -178,20 +76,18 @@ async function handleMessage(message) {
     }
   }
 
-  // 1. ALL URLs IN EXCEPTION LIST
-  if (urlsToScan.length === 0) {
-    // If every single URL is an exception, we do absolutely nothing.
+  if (attachmentsToScan.length === 0 && urlsToScan.length === 0) {
+    // Nothing to scan (either empty or everything is safe/excepted)
     return;
   }
 
-  // 2. SOME URLs NEED SCANNING -> Message is deleted immediately.
+  // WE NEED TO SCAN SOMETHING -> Delete immediately
   try {
     if (message.deletable) await message.delete();
   } catch (err) {
     console.error(`[messageHandler] Could not delete message from ${message.author.tag}:`, err.message);
   }
 
-  // Resolve loading emoji
   let emojiStr = `<a:loading:1496156060539555870>`;
   try {
     if (message.client) {
@@ -201,27 +97,72 @@ async function handleMessage(message) {
   } catch(e) {}
 
   const username = message.member?.displayName || message.author.username;
+  const statusLine = (text) => `**${username}** sent a link/file... ${emojiStr} *${text}*`;
 
-  // Helper to build a status line
-  const statusLine = (text) => `**${username}** sent a link... ${emojiStr} *${text}*`;
-
-  // Send the initial loading message
   let tempMessage = null;
   try {
     tempMessage = await message.channel.send(statusLine('Initiating threat scan...'));
-  } catch (err) {
-    console.error(`[messageHandler] Could not send temp loading message:`, err.message);
-  }
+  } catch (err) {}
 
-  // Helper to silently edit the status message
   const updateStatus = async (text) => {
     if (!tempMessage) return;
     try { await tempMessage.edit(statusLine(text)); } catch(e) {}
   };
 
-  // 3. RUN SCANS — step-by-step with live status updates
-  await updateStatus('Checking phishing databases...');
+  // 1. RUN FILE SCANS
+  const cleanFiles = [];
+  if (attachmentsToScan.length > 0) {
+    for (const attachment of attachmentsToScan) {
+      let scanResult;
+      try {
+        await updateStatus(`Scanning file: ${attachment.name}...`);
+        scanResult = await scanFilePipeline(attachment, updateStatus);
+      } catch (err) {
+        console.error(`[messageHandler] File scan error for ${attachment.name}:`, err.message);
+        await handleMaliciousFile(message, attachment, { 
+          safe: false, 
+          maliciousCount: 0, 
+          method: 'error',
+          error: err.message 
+        });
+        if (tempMessage?.deletable) await tempMessage.delete().catch(() => {});
+        return; // Stop processing entirely
+      }
 
+      if (!scanResult.safe) {
+        if (tempMessage?.deletable) await tempMessage.delete().catch(() => {});
+        await handleMaliciousFile(message, attachment, scanResult);
+        return; // Stop processing entirely
+      }
+
+      cleanFiles.push(attachment);
+
+      // Log clean file scan to mod log
+      try {
+        const { logChannelId } = require('../config');
+        const logChannel = await message.client.channels.fetch(logChannelId);
+        if (logChannel?.isTextBased()) {
+          const cleanEmbed = new EmbedBuilder()
+            .setColor('#00cc66')
+            .setTitle('✅ File Scan — Clean')
+            .setTimestamp()
+            .addFields(
+              { name: '👤 User', value: `${message.author} (${message.author.tag})\nID: \`${message.author.id}\``, inline: true },
+              { name: '📁 File(s)', value: `\`${attachment.name}\` · ${(attachment.size/1024).toFixed(1)} KB`, inline: true },
+              { name: '📍 Channel', value: `<#${message.channelId}>`, inline: true },
+              { name: '🕐 Scanned At', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
+            )
+            .setFooter({ text: 'File Scanner · No threats detected' });
+          await logChannel.send({ embeds: [cleanEmbed] });
+        }
+      } catch(err) {}
+    }
+  }
+
+  // 2. RUN URL SCANS
+  if (urlsToScan.length > 0) {
+    await updateStatus('Checking phishing databases...');
+  }
   const scanPromises = urlsToScan.map(async (url) => {
     const scanRes = await scanPipeline(url, updateStatus);
     return { url, scanRes };
@@ -229,48 +170,41 @@ async function handleMessage(message) {
 
   const scanResults = await Promise.all(scanPromises);
 
-  // Delete the placeholder loading message
+  // Clean up status message
   if (tempMessage && tempMessage.deletable) {
-    try {
-      await tempMessage.delete();
-    } catch (err) {}
+    try { await tempMessage.delete(); } catch(e) {}
   }
 
-  // Check if ANY URL is malicious or if BOTH APIs failed completely on a URL.
   const maliciousResults = scanResults.filter((item) => !item.scanRes.safe);
-
   if (maliciousResults.length > 0) {
-    // A THREAT WAS FOUND! OR APIS FAILED
-    // Re-send NOTHING. Send alerts instead.
+    // URL scan failed! Alert mods.
     for (const match of maliciousResults) {
       await handleMaliciousOrFailedUrl(message, match.url, match.scanRes);
     }
     return;
   }
 
-  // 4. ALL URLs ARE SAFE -> RE-SEND via Webhook
+  // 3. ALL SAFE -> RE-SEND ALL IN ONE MESSAGE
   const linesToSend = [];
   
-  // Excepted URLs go first, no label
-  for (const url of exceptedUrls) {
-    linesToSend.push(url);
-  }
-
-  // Safe scanned URLs go next, labeled "✅ Safe"
   for (const item of scanResults) {
-    let line = `${item.url} ✅ Safe`;
-    // If one API backed up the other, indicate it via note
+    let line = `✅ <${item.url}> is safe!`;
     if (item.scanRes.note) {
       line += ` (${item.scanRes.note})`;
     }
     linesToSend.push(line);
   }
 
-  // Finally send the compiled strings as the user
+  for (const attachment of cleanFiles) {
+    linesToSend.push(`✅ File \`${attachment.name}\` is safe!`);
+  }
+
+  const allReattachFiles = [...safeAttachments, ...cleanFiles].map(a => ({ attachment: a.url, name: a.name }));
+
   try {
-    await sendAsUser(message.channel, message.member || message, linesToSend);
+    await sendAsUser(message.channel, message.member || message, linesToSend, content, allReattachFiles);
   } catch (err) {
-    console.error(`[messageHandler] Webhook re-send failed in #${message.channel.name}:`, err.message);
+    console.error(`[messageHandler] Webhook re-send failed:`, err.message);
   }
 }
 
