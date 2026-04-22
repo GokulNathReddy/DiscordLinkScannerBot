@@ -124,12 +124,34 @@ async function handleMessage(message) {
 
   // 1. RUN FILE SCANS
   const cleanFiles = [];
+  const protectedFiles = [];
   if (attachmentsToScan.length > 0) {
     for (const attachment of attachmentsToScan) {
+      // Check if it's a password-protected zip file
+      let isProtectedZip = false;
+      const preFetched = preFetchedFiles.get(attachment.id);
+
+      if (preFetched && attachment.name.toLowerCase().endsWith('.zip')) {
+        try {
+          const AdmZip = require('adm-zip');
+          const zip = new AdmZip(preFetched.buffer);
+          const entries = zip.getEntries();
+          // Bit 0 of general purpose bit flag indicates encryption
+          isProtectedZip = entries.some(e => e.header && (e.header.flags & 1) !== 0);
+        } catch (e) {
+          // Not a valid zip or corrupted
+        }
+      }
+
+      if (isProtectedZip) {
+        // Skip VT scanning because VT cannot inspect encrypted archives natively
+        protectedFiles.push(attachment);
+        continue;
+      }
+
       let scanResult;
       try {
         await updateStatus(`Scanning file: ${attachment.name}...`);
-        const preFetched = preFetchedFiles.get(attachment.id);
         scanResult = await scanFilePipeline(attachment, updateStatus, preFetched);
       } catch (err) {
         console.error(`[messageHandler] File scan error for ${attachment.name}:`, err.message);
@@ -213,7 +235,11 @@ async function handleMessage(message) {
     linesToSend.push(`✅ File \`${attachment.name}\` is safe!`);
   }
 
-  const allReattachFiles = [...safeAttachments, ...cleanFiles].map(a => ({ attachment: a.url, name: a.name }));
+  for (const attachment of protectedFiles) {
+    linesToSend.push(`⚠️ File \`${attachment.name}\` is password protected and downloading is at users own risk`);
+  }
+
+  const allReattachFiles = [...safeAttachments, ...cleanFiles, ...protectedFiles].map(a => ({ attachment: a.url, name: a.name }));
 
   try {
     await sendAsUser(message.channel, message.member || message, linesToSend, content, allReattachFiles);
