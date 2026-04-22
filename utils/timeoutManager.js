@@ -8,10 +8,10 @@ if (!fs.existsSync(TIMEOUT_FILE)) {
   fs.writeFileSync(TIMEOUT_FILE, '', 'utf8');
 }
 
-// In-memory strike tracking: { userId: { count, lastStrikeTime } }
+// In-memory strike tracking: { userId: { count, firstStrikeTime } }
 const userStrikes = new Map();
 const STRIKE_THRESHOLD = 3;
-const STRIKE_DECAY_MS = 60 * 1000; // 60 seconds decay window for spam detection
+const STRIKE_DECAY_MS = 60 * 1000; // 60 seconds strict window
 const TIMEOUT_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours timeout
 
 /**
@@ -20,12 +20,12 @@ const TIMEOUT_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours timeout
 function cleanupStrikes() {
   const now = Date.now();
   for (const [userId, data] of userStrikes.entries()) {
-    if (now - data.lastStrikeTime > STRIKE_DECAY_MS) {
+    if (now - data.firstStrikeTime > STRIKE_DECAY_MS) {
       userStrikes.delete(userId);
     }
   }
 }
-setInterval(cleanupStrikes, 60 * 1000);
+setInterval(cleanupStrikes, 10000); // Clean up every 10 seconds for higher accuracy
 
 /**
  * Add an infraction strike to a user. Over threshold limits them.
@@ -36,19 +36,19 @@ async function addStrike(member) {
 
   cleanupStrikes();
   
-  let data = userStrikes.get(member.id) || { count: 0, lastStrikeTime: Date.now() };
+  // Create a strict 60-second absolute window
+  let data = userStrikes.get(member.id) || { count: 0, firstStrikeTime: Date.now() };
   data.count += 1;
-  data.lastStrikeTime = Date.now();
   userStrikes.set(member.id, data);
 
   if (data.count >= STRIKE_THRESHOLD) {
     // Auto-timeout
     try {
       await manualTimeout(member, 'Auto-timeout: Repeated severe infractions (Spamming malicious links/invites)');
-      userStrikes.delete(member.id); // Reset strikes after timeout
     } catch (e) {
       console.error(`[timeoutManager] Failed to auto-timeout ${member.user.tag}:`, e.message);
     }
+    userStrikes.delete(member.id); // Always reset strikes after hitting threshold
   }
 }
 
