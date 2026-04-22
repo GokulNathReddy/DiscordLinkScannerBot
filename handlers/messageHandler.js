@@ -115,8 +115,6 @@ async function handleMessage(message) {
     if (fileTempMsg?.deletable) await fileTempMsg.delete().catch(() => {});
 
     try {
-      // Re-send clean files as the user via webhook
-      // We send the original message content + attachments
       const webhookContent = content || null;
       const { getOrCreateWebhook } = require('../utils/webhook');
       const webhook = await getOrCreateWebhook(message.channel);
@@ -130,11 +128,33 @@ async function handleMessage(message) {
         });
       }
     } catch (err) {
-      console.error(`[messageHandler] Failed to re-send clean file:`, err.message);
+      console.error('[messageHandler] Failed to re-send clean file:', err.message);
     }
 
+    // Log clean scan to mod log
+    try {
+      const { logChannelId } = require('../config');
+      const logChannel = await message.client.channels.fetch(logChannelId);
+      if (logChannel?.isTextBased()) {
+        const cleanEmbed = new EmbedBuilder()
+          .setColor('#00cc66')
+          .setTitle('✅ File Scan — Clean')
+          .setTimestamp()
+          .addFields(
+            { name: '👤 User', value: `${message.author} (${message.author.tag})\nID: \`${message.author.id}\``, inline: true },
+            { name: '📁 File(s)', value: attachmentsToScan.map(a => {
+                const ext = (a.name || '').split('.').pop().toUpperCase() || 'UNKNOWN';
+                return `\`${a.name}\` · ${(a.size/1024).toFixed(1)} KB · \`${ext}\``;
+              }).join('\n'), inline: true },
+            { name: '📍 Channel', value: `<#${message.channelId}>`, inline: true },
+            { name: '🕐 Scanned At', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
+          )
+          .setFooter({ text: 'File Scanner · No threats detected' });
+        await logChannel.send({ embeds: [cleanEmbed] });
+      }
+    } catch(err) {}
+
     // If there are also URLs in this message, fall through and scan them too
-    // But if it's attachment-only, return here
     const rawUrlsCheck = content.match(URL_REGEX) || [];
     if (rawUrlsCheck.length === 0) return;
   }
@@ -324,35 +344,71 @@ async function handleMaliciousOrFailedUrl(message, url, res) {
  */
 async function handleMaliciousFile(message, attachment, scanResult) {
   const { logChannelId } = require('../config');
+  const fileSizeKB = (attachment.size / 1024).toFixed(1);
+  const fileExt = (attachment.name || '').split('.').pop().toUpperCase() || 'UNKNOWN';
   const embed = new EmbedBuilder().setTimestamp();
 
   if (scanResult.method === 'error') {
+    // ── Scanner error embed ──────────────────────────────────
     embed
       .setColor('#ff9900')
       .setTitle('⚠️ FILE UNVERIFIED — Scanner Error')
-      .setDescription(`**Mods: Please review this file manually.**\nScanner error — file blocked for safety.`)
+      .setDescription(`File blocked for safety due to scanner failure. **Mods: please review manually.**`)
       .addFields(
-        { name: 'User', value: `${message.author} (ID: ${message.author.id})` },
-        { name: 'File', value: `\`${attachment.name}\` (${(attachment.size / 1024).toFixed(1)} KB)` },
-        { name: 'Error', value: scanResult.error || 'Unknown error' }
-      );
+        { name: '👤 User', value: `${message.author} (${message.author.tag})\nID: \`${message.author.id}\``, inline: true },
+        { name: '📁 File', value: `\`${attachment.name}\`\n${fileSizeKB} KB · \`${fileExt}\``, inline: true },
+        { name: '🔗 Original URL', value: `[View File](${attachment.url})` },
+        { name: '❌ Error', value: `\`\`\`${scanResult.error || 'Unknown error'}\`\`\`` },
+        { name: '📍 Channel', value: `<#${message.channelId}>`, inline: true },
+        { name: '🕐 Time', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
+      )
+      .setFooter({ text: 'File Scanner · Error' });
 
     try {
-      await message.author.send(`⚠️ Your file in **${message.guild.name}** was removed because our malware scanner encountered an error. Please try again later or contact a mod.`);
+      await message.author.send(`⚠️ Your file **${attachment.name}** in **${message.guild.name}** was removed because our malware scanner encountered an error. Please try again later or contact a mod.`);
     } catch(e) {}
+
   } else {
+    // ── Malicious file embed ─────────────────────────────────
+    const threatLabel = scanResult.popularThreatName
+      ? `**${scanResult.popularThreatName}**`
+      : `Unknown (${scanResult.maliciousCount} engine${scanResult.maliciousCount !== 1 ? 's' : ''} flagged)`;
+
+    const threatNamesStr = scanResult.threatNames?.length
+      ? scanResult.threatNames.map(n => `\`${n}\``).join('\n')
+      : '`N/A`';
+
+    const threatTypesStr = scanResult.threatTypes?.length
+      ? scanResult.threatTypes.map(t => `\`${t}\``).join(', ')
+      : '`N/A`';
+
     embed
       .setColor('#ff0000')
-      .setTitle('🚨 Malicious File Blocked')
+      .setTitle('🚨 MALICIOUS FILE BLOCKED')
+      .setDescription(`A file uploaded by ${message.author} has been flagged as **malicious** and blocked.`)
       .addFields(
-        { name: 'User', value: `${message.author} (ID: ${message.author.id})` },
-        { name: 'File', value: `\`${attachment.name}\` (${(attachment.size / 1024).toFixed(1)} KB)` },
-        { name: 'VT Malicious Engines', value: `${scanResult.maliciousCount}`, inline: true },
-        { name: 'Scan Method', value: scanResult.method === 'hash-lookup' ? 'Hash Reputation' : 'Full Sandbox', inline: true }
-      );
+        { name: '👤 User', value: `${message.author} (${message.author.tag})\nID: \`${message.author.id}\``, inline: true },
+        { name: '📁 File', value: `\`${attachment.name}\`\n${fileSizeKB} KB · \`${fileExt}\``, inline: true },
+        { name: '\u200b', value: '\u200b', inline: true }, // spacer
+        { name: '🦠 Threat Classification', value: threatLabel, inline: true },
+        { name: '🔬 Scan Method', value: scanResult.method === 'hash-lookup' ? '`Hash Reputation`' : '`Full VT Sandbox`', inline: true },
+        { name: '\u200b', value: '\u200b', inline: true },
+        { name: '📊 Engine Results', value: [
+            `🔴 Malicious: **${scanResult.maliciousCount}**`,
+            `🟠 Suspicious: **${scanResult.suspiciousCount || 0}**`,
+            `🟢 Harmless: **${scanResult.harmlessCount || 0}**`,
+            `⚪ Undetected: **${scanResult.undetectedCount || 0}**`,
+          ].join('\n'), inline: true },
+        { name: '🏷️ Threat Names Detected', value: threatNamesStr, inline: true },
+        { name: '⚙️ Exploit Types', value: threatTypesStr, inline: false },
+        { name: '🔗 Original File URL', value: `[View on Discord CDN](${attachment.url})` },
+        { name: '📍 Channel', value: `<#${message.channelId}>`, inline: true },
+        { name: '🕐 Detected At', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
+      )
+      .setFooter({ text: 'File Scanner · Powered by VirusTotal' });
 
     try {
-      await message.author.send(`🚨 **Warning:** Your file \`${attachment.name}\` in **${message.guild.name}** was flagged as malicious by **${scanResult.maliciousCount}** antivirus engine(s) and has been removed.`);
+      await message.author.send(`🚨 **Malware Detected:** Your file \`${attachment.name}\` in **${message.guild.name}** was flagged as malicious by **${scanResult.maliciousCount}** AV engine(s) and removed.\n\nThreat: ${scanResult.popularThreatName || 'Unknown'}`);
     } catch(e) {}
   }
 
@@ -360,7 +416,7 @@ async function handleMaliciousFile(message, attachment, scanResult) {
     const logChannel = await message.client.channels.fetch(logChannelId);
     if (logChannel?.isTextBased()) await logChannel.send({ embeds: [embed] });
   } catch(err) {
-    console.error(`[messageHandler] Could not log malicious file to channel:`, err.message);
+    console.error(`[messageHandler] Could not log malicious file:`, err.message);
   }
 }
 

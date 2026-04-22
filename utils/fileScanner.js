@@ -9,32 +9,16 @@ const FormData = require('form-data');
 const { apis } = require('../config');
 
 // ── File type classification ──────────────────────────────────
+// DEFAULT: SCAN EVERYTHING except pure user media (images/video/audio).
 
-// These are safe to pass through — no scanning needed
 const SKIP_MIME_PREFIXES = ['image/', 'video/', 'audio/'];
 const SKIP_EXTENSIONS = new Set([
-  'jpg','jpeg','png','gif','webp','svg','bmp','ico','tiff','avif',
-  'mp4','mkv','mov','avi','webm','flv','wmv','m4v',
-  'mp3','wav','ogg','flac','aac','m4a','opus',
-]);
-
-// These are risky and MUST be scanned
-const SCAN_EXTENSIONS = new Set([
-  // Executables
-  'exe','msi','dll','sys','drv','com','scr','cpl',
-  // Scripts
-  'bat','cmd','ps1','psm1','psd1','vbs','vbe','js','jse','wsf','wsh','hta',
-  'sh','bash','zsh','fish','py','rb','pl','lua','php',
-  // Archives (can contain malware)
-  'zip','rar','7z','tar','gz','bz2','xz','iso','img','cab',
-  // Documents with macro risk
-  'pdf','doc','docx','docm','xls','xlsx','xlsm','ppt','pptx','pptm',
-  'odt','ods','odp',
-  // Code / config
-  'html','htm','xml','json','yaml','yml','toml','ini','cfg','conf',
-  // Other risky
-  'jar','apk','ipa','deb','rpm','dmg','pkg','appimage',
-  'lnk','url','torrent','reg','inf',
+  // Images
+  'jpg','jpeg','png','gif','webp','svg','bmp','ico','tiff','avif','heic','heif','raw','cr2','nef',
+  // Video
+  'mp4','mkv','mov','avi','webm','flv','wmv','m4v','3gp','ts','mts','m2ts',
+  // Audio
+  'mp3','wav','ogg','flac','aac','m4a','opus','wma','aiff','mid','midi',
 ]);
 
 const VT_DELAY_MS = 15000;
@@ -70,14 +54,11 @@ function classifyAttachment(attachment) {
   const ext = name.includes('.') ? name.split('.').pop() : '';
   const mime = (attachment.contentType || '').toLowerCase();
 
-  // Always skip media
+  // Skip pure media — everything else gets scanned, no exceptions
   if (SKIP_MIME_PREFIXES.some(p => mime.startsWith(p))) return { action: 'skip', ext };
   if (SKIP_EXTENSIONS.has(ext)) return { action: 'skip', ext };
 
-  // Known risky → scan
-  if (SCAN_EXTENSIONS.has(ext)) return { action: 'scan', ext };
-
-  // Unknown extension → scan anyway (safer)
+  // Scan everything else — text, config, code, docs, archives, executables, unknown
   return { action: 'scan', ext: ext || 'unknown' };
 }
 
@@ -109,12 +90,18 @@ async function checkHashReputation(sha256, headers) {
       headers,
       timeout: 10000,
     });
-    const stats = res.data.data.attributes.last_analysis_stats;
-    const maliciousCount = stats.malicious || 0;
+    const attrs = res.data.data.attributes;
+    const stats = attrs.last_analysis_stats;
+    const maliciousCount = (stats.malicious || 0) + (stats.suspicious || 0);
+    const threatDetails = extractThreatDetails(attrs);
     return {
       safe: maliciousCount === 0,
       maliciousCount,
+      suspiciousCount: stats.suspicious || 0,
+      harmlessCount: stats.harmless || 0,
+      undetectedCount: stats.undetected || 0,
       method: 'hash-lookup',
+      ...threatDetails,
       raw: res.data.data,
     };
   } catch (err) {
@@ -146,6 +133,32 @@ async function uploadFile(buffer, filename, headers) {
 }
 
 /**
+ * Extract detailed threat info from VT raw attributes.
+ * Returns { threatNames, categories, threatTypes }
+ */
+function extractThreatDetails(attributes) {
+  const results = attributes.last_analysis_results || attributes.results || {};
+  const threatNames = new Set();
+  const threatTypes = new Set();
+
+  for (const engine of Object.values(results)) {
+    if (engine.category === 'malicious' || engine.category === 'suspicious') {
+      if (engine.result) threatNames.add(engine.result);
+      if (engine.method) threatTypes.add(engine.method);
+    }
+  }
+
+  // VT type tags (e.g. "trojan", "ransomware", "spyware")
+  const typeTags = (attributes.type_tags || attributes.tags || []);
+
+  return {
+    threatNames: [...threatNames].slice(0, 5), // top 5 unique names
+    threatTypes: [...new Set([...typeTags, ...threatTypes])].slice(0, 5),
+    popularThreatName: attributes.popular_threat_classification?.suggested_threat_label || null,
+  };
+}
+
+/**
  * Poll VT analysis until completed.
  * @param {string} analysisId
  * @param {object} headers
@@ -160,11 +173,16 @@ async function pollFileAnalysis(analysisId, headers) {
     const data = res.data.data;
     if (data.attributes.status === 'completed') {
       const stats = data.attributes.stats;
-      const maliciousCount = stats.malicious || 0;
+      const maliciousCount = (stats.malicious || 0) + (stats.suspicious || 0);
+      const threatDetails = extractThreatDetails(data.attributes);
       return {
         safe: maliciousCount === 0,
         maliciousCount,
+        suspiciousCount: stats.suspicious || 0,
+        harmlessCount: stats.harmless || 0,
+        undetectedCount: stats.undetected || 0,
         method: 'full-upload',
+        ...threatDetails,
         raw: data,
       };
     }
