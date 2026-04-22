@@ -164,7 +164,7 @@ function extractThreatDetails(attributes) {
  * @param {object} headers
  */
 async function pollFileAnalysis(analysisId, headers) {
-  const maxAttempts = 20; // 20 * 5s = 100s max
+  const maxAttempts = 60; // 60 * 5s = 300s max (5 minutes for Sandbox processing)
   for (let i = 0; i < maxAttempts; i++) {
     const res = await axios.get(`https://www.virustotal.com/api/v3/analyses/${analysisId}`, {
       headers,
