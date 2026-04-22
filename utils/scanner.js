@@ -20,7 +20,7 @@ const { config } = require('../config'); // used for checking enablement in lowe
  * @property {string|null} apiErrorContext - String detailing which APIs failed if any
  */
 
-const delay = (ms) => new Promise(r => setTimeout(r, ms));
+
 
 /**
  * Run a URL through the full security pipeline.
@@ -34,12 +34,8 @@ const delay = (ms) => new Promise(r => setTimeout(r, ms));
  * @param {string} url
  * @returns {Promise<ScanResult>}
  */
-async function scanPipeline(url, onProgress) {
+async function scanPipeline(url) {
   // --- 1. LOCAL CHECK (stop-discord-phishing) ---
-  if (onProgress) {
-    await onProgress('*Checking local phishing databases...*');
-    await delay(1000); // Visual delay for effect
-  }
   // Using true for strict mode checking both phishing and suspicious.
   const isSpam = await stopPhishing.checkMessage(url, true);
   if (isSpam) {
@@ -56,19 +52,11 @@ async function scanPipeline(url, onProgress) {
   // --- 2. CACHE ---
   const cached = cache.get(url);
   if (cached) {
-    if (onProgress) {
-      await onProgress('*Loading VirusTotal & IPQualityScore result from cache...*');
-      await delay(1200);
-    }
     return cached;
   }
 
   // --- 2.5 LIVENESS / DEAD LINK CHECK ---
   // The user explicitly requested to kill 404s and invalid links.
-  if (onProgress) {
-    await onProgress('*Verifying secure link liveness...*');
-    await delay(1000);
-  }
   try {
     const axios = require('axios');
     const res = await axios.head(url, { 
@@ -102,10 +90,6 @@ async function scanPipeline(url, onProgress) {
   }
 
   // --- 3. Parallel API Execution (IPQS + VT) ---
-  if (onProgress) {
-    await onProgress('*Starting VirusTotal & IPQualityScore analysis...*');
-    await delay(1500);
-  }
   let ipqsPromise = checkIpqs(url).catch(e => e); // catch so Promise.all doesn't fail fast
   let vtPromise   = checkVt(url).catch(e => e);
 

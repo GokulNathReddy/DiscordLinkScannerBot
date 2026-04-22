@@ -112,22 +112,33 @@ async function handleMessage(message) {
   }
 
   // 3. RUN SCANS IN PARALLEL
-  let progressCallback = undefined;
-  if (tempMessage) {
-    progressCallback = async (status) => {
-      try {
-        await tempMessage.edit(`**${username}** sent a link... ${emojiStr} ${status}`);
-      } catch (err) {
-        console.error(`[messageHandler] Error updating progress:`, err.message);
-      }
-    };
-  }
-
   // Map urls to promises resolving to { url, scanRes }
   const scanPromises = urlsToScan.map(async (url) => {
-    const scanRes = await scanPipeline(url, progressCallback);
+    const scanRes = await scanPipeline(url);
     return { url, scanRes };
   });
+
+  // Futuristic loading bar sequence to make the bot feel "alive" and highly technical
+  const loadingSteps = [
+    `\`[▓░░░░░░░░░]\` *Initiating Cyber Threat Analysis...*`,
+    `\`[▓▓▓░░░░░░░]\` *Querying Global Threat Signatures...*`,
+    `\`[▓▓▓▓▓░░░░░]\` *Verifying SSL/TLS & Domain Telemetry...*`,
+    `\`[▓▓▓▓▓▓▓░░░]\` *Injecting payload to VirusTotal Neural Net...*`,
+    `\`[▓▓▓▓▓▓▓▓▓░]\` *Cross-referencing Zero-Day exploits...*`,
+    `\`[▓▓▓▓▓▓▓▓▓▓]\` *Finalizing security protocols...*`
+  ];
+
+  if (tempMessage) {
+    for (let i = 0; i < loadingSteps.length; i++) {
+      try {
+        await tempMessage.edit(`**${username}** sent a link... ${emojiStr}\n> ${loadingSteps[i]}`);
+        // 1.2s delay between visual updates
+        await new Promise(r => setTimeout(r, 1200));
+      } catch (err) {
+        break; // If message was deleted or rate limited, just stop animating
+      }
+    }
+  }
 
   const scanResults = await Promise.all(scanPromises);
 
