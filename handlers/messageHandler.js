@@ -106,7 +106,7 @@ async function handleMessage(message) {
     } catch(e) {}
     
     const username = message.member?.displayName || message.author.username;
-    tempMessage = await message.channel.send(`**${username}** sent a link... ${emojiStr} *Scanning for threats...*`);
+    tempMessage = await message.channel.send(`**${username}** sent a link... ${emojiStr} *Initializing scan...*`);
   } catch (err) {
     console.error(`[messageHandler] Could not send temp loading message:`, err.message);
   }
