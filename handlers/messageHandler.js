@@ -112,9 +112,18 @@ async function handleMessage(message) {
   }
 
   // 3. RUN SCANS IN PARALLEL
+  let progressCallback = undefined;
+  if (urlsToScan.length === 1 && tempMessage) {
+    progressCallback = async (status) => {
+      try {
+        await tempMessage.edit(`**${username}** sent a link... ${emojiStr} ${status}`);
+      } catch (err) {}
+    };
+  }
+
   // Map urls to promises resolving to { url, scanRes }
   const scanPromises = urlsToScan.map(async (url) => {
-    const scanRes = await scanPipeline(url);
+    const scanRes = await scanPipeline(url, progressCallback);
     return { url, scanRes };
   });
 
@@ -147,12 +156,19 @@ async function handleMessage(message) {
     linesToSend.push(url);
   }
 
-  // Safe scanned URLs go next, labeled "✅ Safe"
+  // Safe scanned URLs go next, labeled with detail
   for (const item of scanResults) {
-    let line = `${item.url} ✅ Safe`;
+    let apisUsed = [];
+    if (item.scanRes.ipqsScore !== null) apisUsed.push('IPQualityScore');
+    if (item.scanRes.vtMalicious !== null) apisUsed.push('VirusTotal');
+    
+    let verifiedStr = apisUsed.length > 0 ? `Verified by ${apisUsed.join(' & ')}` : `Verified securely`;
+    
+    let line = `${item.url} - ✅ **Safe** (${verifiedStr})`;
+    
     // If one API backed up the other, indicate it via note
     if (item.scanRes.note) {
-      line += ` (${item.scanRes.note})`;
+      line += `\n*Note: ${item.scanRes.note}*`;
     }
     linesToSend.push(line);
   }

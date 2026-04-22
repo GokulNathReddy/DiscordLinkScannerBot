@@ -32,8 +32,9 @@ const { config } = require('../config'); // used for checking enablement in lowe
  * @param {string} url
  * @returns {Promise<ScanResult>}
  */
-async function scanPipeline(url) {
+async function scanPipeline(url, onProgress) {
   // --- 1. LOCAL CHECK (stop-discord-phishing) ---
+  if (onProgress) await onProgress('*Checking local databases...*');
   // Using true for strict mode checking both phishing and suspicious.
   const isSpam = await stopPhishing.checkMessage(url, true);
   if (isSpam) {
@@ -49,10 +50,14 @@ async function scanPipeline(url) {
 
   // --- 2. CACHE ---
   const cached = cache.get(url);
-  if (cached) return cached;
+  if (cached) {
+    if (onProgress) await onProgress('*Loaded result from secure cache...*');
+    return cached;
+  }
 
   // --- 2.5 LIVENESS / DEAD LINK CHECK ---
   // The user explicitly requested to kill 404s and invalid links.
+  if (onProgress) await onProgress('*Verifying link liveness...*');
   try {
     const axios = require('axios');
     const res = await axios.head(url, { 
@@ -86,6 +91,7 @@ async function scanPipeline(url) {
   }
 
   // --- 3. Parallel API Execution (IPQS + VT) ---
+  if (onProgress) await onProgress('*Starting VirusTotal & IPQualityScore analysis...*');
   let ipqsPromise = checkIpqs(url).catch(e => e); // catch so Promise.all doesn't fail fast
   let vtPromise   = checkVt(url).catch(e => e);
 
