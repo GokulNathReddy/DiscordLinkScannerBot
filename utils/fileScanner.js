@@ -21,26 +21,7 @@ const SKIP_EXTENSIONS = new Set([
   'mp3','wav','ogg','flac','aac','m4a','opus','wma','aiff','mid','midi',
 ]);
 
-const VT_DELAY_MS = 0; // Disabled artificial delay to speed up scans
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-/** Global VT queue tail (shared concept with url scanner, separate chain here) */
-let fileScanQueueTail = Promise.resolve();
-
-function enqueueFile(fn) {
-  return new Promise((resolve, reject) => {
-    fileScanQueueTail = fileScanQueueTail
-      .then(async () => {
-        try {
-          resolve(await fn());
-        } catch (err) {
-          reject(err);
-        }
-        if (VT_DELAY_MS > 0) await sleep(VT_DELAY_MS);
-      })
-      .catch(err => console.error('[fileScanner] queue error:', err));
-  });
-}
 
 /**
  * Determine if an attachment should be scanned.
@@ -209,8 +190,7 @@ async function scanFilePipeline(attachment, updateStatus = async () => {}, preFe
 
   const headers = { 'x-apikey': apis.virustotal.apiKey };
 
-  return enqueueFile(async () => {
-    // Step 1: Download or use pre-fetched
+  // Step 1: Download or use pre-fetched
     let buffer, hash;
     if (preFetchedData) {
       buffer = preFetchedData.buffer;
@@ -251,7 +231,6 @@ async function scanFilePipeline(attachment, updateStatus = async () => {}, preFe
     const finalResult = await pollFileAnalysis(analysisId, headers);
     await updateStatus(`Analysis complete — compiling threat report...`);
     return finalResult;
-  });
 }
 
 module.exports = { classifyAttachment, scanFilePipeline, downloadAndHash };

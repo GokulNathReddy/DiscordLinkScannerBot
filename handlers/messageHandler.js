@@ -136,8 +136,10 @@ async function handleMessage(message) {
   // 1. RUN FILE SCANS
   const cleanFiles = [];
   const protectedFiles = [];
+  let fileScanFailed = false;
+
   if (attachmentsToScan.length > 0) {
-    for (const attachment of attachmentsToScan) {
+    const filePromises = attachmentsToScan.map(async (attachment) => {
       // Check if it's a password-protected zip file
       let isProtectedZip = false;
       const preFetched = preFetchedFiles.get(attachment.id);
@@ -147,7 +149,6 @@ async function handleMessage(message) {
           const AdmZip = require('adm-zip');
           const zip = new AdmZip(preFetched.buffer);
           const entries = zip.getEntries();
-          // Bit 0 of general purpose bit flag indicates encryption
           isProtectedZip = entries.some(e => e.header && (e.header.flags & 1) !== 0);
         } catch (e) {
           // Not a valid zip or corrupted
@@ -155,55 +156,62 @@ async function handleMessage(message) {
       }
 
       if (isProtectedZip) {
-        // Skip VT scanning because VT cannot inspect encrypted archives natively
-        protectedFiles.push(attachment);
-        continue;
+        return { status: 'protected', attachment };
       }
 
-      let scanResult;
       try {
-        await updateStatus(`Scanning file: ${attachment.name}...`);
-        scanResult = await scanFilePipeline(attachment, updateStatus, preFetched);
+        updateStatus(`Scanning file: ${attachment.name}...`);
+        const scanResult = await scanFilePipeline(attachment, updateStatus, preFetched);
+        if (!scanResult.safe) return { status: 'malicious', attachment, scanResult };
+        
+        return { status: 'clean', attachment };
       } catch (err) {
         console.error(`[messageHandler] File scan error for ${attachment.name}:`, err.message);
-        await handleMaliciousFile(message, attachment, { 
-          safe: false, 
-          maliciousCount: 0, 
-          method: 'error',
-          error: err.message 
-        });
-        if (tempMessage?.deletable) await tempMessage.delete().catch(() => {});
-        return; // Stop processing entirely
+        return { status: 'error', attachment, error: err.message };
       }
+    });
 
-      if (!scanResult.safe) {
+    const fileResults = await Promise.all(filePromises);
+
+    for (const res of fileResults) {
+      if (res.status === 'protected') {
+        protectedFiles.push(res.attachment);
+      } else if (res.status === 'malicious' || res.status === 'error') {
+        fileScanFailed = true;
         if (tempMessage?.deletable) await tempMessage.delete().catch(() => {});
-        await handleMaliciousFile(message, attachment, scanResult);
-        return; // Stop processing entirely
+        
+        const payload = res.status === 'error' 
+           ? { safe: false, maliciousCount: 0, method: 'error', error: res.error } 
+           : res.scanResult;
+           
+        await handleMaliciousFile(message, res.attachment, payload);
+      } else if (res.status === 'clean') {
+        cleanFiles.push(res.attachment);
+        
+        // Log clean file scan to mod log
+        try {
+          const { logChannelId } = require('../config');
+          const logChannel = await message.client.channels.fetch(logChannelId);
+          if (logChannel?.isTextBased()) {
+            const { EmbedBuilder } = require('discord.js');
+            const cleanEmbed = new EmbedBuilder()
+              .setColor('#00cc66')
+              .setTitle('✅ File Scan — Clean')
+              .setTimestamp()
+              .addFields(
+                { name: '👤 User', value: `${message.author} (${message.author.tag})\nID: \`${message.author.id}\``, inline: true },
+                { name: '📁 File', value: `\`${res.attachment.name}\` · ${(res.attachment.size/1024).toFixed(1)} KB`, inline: true },
+                { name: '📍 Channel', value: `<#${message.channelId}>`, inline: true },
+              )
+              .setFooter({ text: 'File Scanner · No threats detected' });
+            await logChannel.send({ embeds: [cleanEmbed] });
+          }
+        } catch(err) {}
       }
-
-      cleanFiles.push(attachment);
-
-      // Log clean file scan to mod log
-      try {
-        const { logChannelId } = require('../config');
-        const logChannel = await message.client.channels.fetch(logChannelId);
-        if (logChannel?.isTextBased()) {
-          const cleanEmbed = new EmbedBuilder()
-            .setColor('#00cc66')
-            .setTitle('✅ File Scan — Clean')
-            .setTimestamp()
-            .addFields(
-              { name: '👤 User', value: `${message.author} (${message.author.tag})\nID: \`${message.author.id}\``, inline: true },
-              { name: '📁 File(s)', value: `\`${attachment.name}\` · ${(attachment.size/1024).toFixed(1)} KB`, inline: true },
-              { name: '📍 Channel', value: `<#${message.channelId}>`, inline: true },
-              { name: '🕐 Scanned At', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
-            )
-            .setFooter({ text: 'File Scanner · No threats detected' });
-          await logChannel.send({ embeds: [cleanEmbed] });
-        }
-      } catch(err) {}
     }
+    
+    // Stop processing entirely if any file was flagged as a threat
+    if (fileScanFailed) return;
   }
 
   // 2. RUN URL SCANS
