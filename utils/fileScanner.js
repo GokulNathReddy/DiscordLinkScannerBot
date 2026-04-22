@@ -199,9 +199,10 @@ async function pollFileAnalysis(analysisId, headers) {
  *
  * @param {import('discord.js').Attachment} attachment
  * @param {Function} updateStatus - async (text: string) => void
+ * @param {object} preFetchedData - Optional { buffer, hash } to skip download
  * @returns {Promise<{ safe: boolean, maliciousCount: number, method: string, error?: string }>}
  */
-async function scanFilePipeline(attachment, updateStatus = async () => {}) {
+async function scanFilePipeline(attachment, updateStatus = async () => {}, preFetchedData = null) {
   if (!apis.virustotal.enabled || !apis.virustotal.apiKey) {
     throw new Error('VirusTotal not configured');
   }
@@ -209,13 +210,18 @@ async function scanFilePipeline(attachment, updateStatus = async () => {}) {
   const headers = { 'x-apikey': apis.virustotal.apiKey };
 
   return enqueueFile(async () => {
-    // Step 1: Download
-    await updateStatus(`Downloading \`${attachment.name}\` for analysis...`);
+    // Step 1: Download or use pre-fetched
     let buffer, hash;
-    try {
-      ({ buffer, hash } = await downloadAndHash(attachment.url));
-    } catch (err) {
-      throw new Error(`Download failed: ${err.message}`);
+    if (preFetchedData) {
+      buffer = preFetchedData.buffer;
+      hash = preFetchedData.hash;
+    } else {
+      await updateStatus(`Downloading \`${attachment.name}\` for analysis...`);
+      try {
+        ({ buffer, hash } = await downloadAndHash(attachment.url));
+      } catch (err) {
+        throw new Error(`Download failed: ${err.message}`);
+      }
     }
 
     // Step 2: Hash reputation (instant, saves quota)
@@ -248,4 +254,4 @@ async function scanFilePipeline(attachment, updateStatus = async () => {}) {
   });
 }
 
-module.exports = { classifyAttachment, scanFilePipeline };
+module.exports = { classifyAttachment, scanFilePipeline, downloadAndHash };

@@ -6,7 +6,7 @@ const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const { config } = require('../config');
 const { isDomainExcepted } = require('../utils/exceptions');
 const { scanPipeline } = require('../utils/scanner');
-const { classifyAttachment, scanFilePipeline } = require('../utils/fileScanner');
+const { classifyAttachment, scanFilePipeline, downloadAndHash } = require('../utils/fileScanner');
 const { sendAsUser } = require('../utils/webhook');
 
 // Robust URL matching regex
@@ -81,7 +81,20 @@ async function handleMessage(message) {
     return;
   }
 
-  // WE NEED TO SCAN SOMETHING -> Delete immediately
+  // PRE-FETCH FILES BEFORE DELETING MESSAGE (Prevents Discord CDN 404 errors)
+  const preFetchedFiles = new Map();
+  if (attachmentsToScan.length > 0) {
+    for (const att of attachmentsToScan) {
+      try {
+        const data = await downloadAndHash(att.url);
+        preFetchedFiles.set(att.id, data);
+      } catch (e) {
+        console.error(`[messageHandler] Pre-fetch failed for ${att.name}:`, e.message);
+      }
+    }
+  }
+
+  // WE NEED TO SCAN SOMETHING -> Delete immediately now that files are buffered
   try {
     if (message.deletable) await message.delete();
   } catch (err) {
@@ -116,7 +129,8 @@ async function handleMessage(message) {
       let scanResult;
       try {
         await updateStatus(`Scanning file: ${attachment.name}...`);
-        scanResult = await scanFilePipeline(attachment, updateStatus);
+        const preFetched = preFetchedFiles.get(attachment.id);
+        scanResult = await scanFilePipeline(attachment, updateStatus, preFetched);
       } catch (err) {
         console.error(`[messageHandler] File scan error for ${attachment.name}:`, err.message);
         await handleMaliciousFile(message, attachment, { 
