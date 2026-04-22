@@ -128,19 +128,25 @@ async function handleMessage(message) {
     `\`[▓▓▓▓▓▓▓▓▓▓]\` *Finalizing security protocols...*`
   ];
 
-  if (tempMessage) {
+  const animateLoading = async () => {
+    if (!tempMessage) return;
     for (let i = 0; i < loadingSteps.length; i++) {
       try {
-        await tempMessage.edit(`**${username}** sent a link... ${emojiStr}\n> ${loadingSteps[i]}`);
-        // 1.2s delay between visual updates
-        await new Promise(r => setTimeout(r, 1200));
+        await tempMessage.edit({ content: `**${username}** sent a link... ${emojiStr}\n> ${loadingSteps[i]}` });
+        // Wait 1.5 seconds between steps for maximum visual effect
+        await new Promise(r => setTimeout(r, 1500));
       } catch (err) {
-        break; // If message was deleted or rate limited, just stop animating
+        console.error(`[messageHandler] Animation error:`, err.message);
+        break;
       }
     }
-  }
+  };
 
-  const scanResults = await Promise.all(scanPromises);
+  // Run the animation and the scans concurrently
+  const [scanResults] = await Promise.all([
+    Promise.all(scanPromises),
+    animateLoading()
+  ]);
 
   // Delete the placeholder loading message
   if (tempMessage && tempMessage.deletable) {
