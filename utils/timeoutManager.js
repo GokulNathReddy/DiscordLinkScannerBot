@@ -11,7 +11,7 @@ if (!fs.existsSync(TIMEOUT_FILE)) {
 // In-memory strike tracking: { userId: { count, lastStrikeTime } }
 const userStrikes = new Map();
 const STRIKE_THRESHOLD = 3;
-const STRIKE_DECAY_MS = 60 * 60 * 1000; // 1 hour decay
+const STRIKE_DECAY_MS = 60 * 1000; // 60 seconds decay window for spam detection
 const TIMEOUT_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours timeout
 
 /**
@@ -25,7 +25,7 @@ function cleanupStrikes() {
     }
   }
 }
-setInterval(cleanupStrikes, 10 * 60 * 1000);
+setInterval(cleanupStrikes, 60 * 1000);
 
 /**
  * Add an infraction strike to a user. Over threshold limits them.
