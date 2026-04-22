@@ -8,6 +8,7 @@ const { isDomainExcepted } = require('../utils/exceptions');
 const { scanPipeline } = require('../utils/scanner');
 const { classifyAttachment, scanFilePipeline, downloadAndHash } = require('../utils/fileScanner');
 const { sendAsUser } = require('../utils/webhook');
+const { addStrike } = require('../utils/timeoutManager');
 
 // Robust URL matching regex
 const URL_REGEX = /(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})/gi;
@@ -34,6 +35,9 @@ async function handleMessage(message) {
       try {
         await message.author.send(`🚨 **Warning:** Promotional Discord server links and invites are not allowed in this server.`);
       } catch (e) {}
+      
+      const { addStrike } = require('../utils/timeoutManager');
+      await addStrike(message.member);
 
       // Log to mod channel
       try {
@@ -293,13 +297,16 @@ async function handleMaliciousOrFailedUrl(message, url, res) {
       embed.addFields({ name: 'VT Malicious Count', value: `${res.vtMalicious}`, inline: true });
     }
 
-    // DM the user
-    try {
-      await message.author.send(`🚨 **Warning:** Your message in ${message.guild.name} was removed and flagged as malicious.\n\nFlagged by: ${res.reason}\nURL: \`${url}\``);
-    } catch (e) {
-      // Target might have DMs disabled.
+      // DM the user
+      try {
+        await message.author.send(`🚨 **Warning:** Your message in ${message.guild.name} was removed and flagged as malicious.\n\nFlagged by: ${res.reason}\nURL: \`${url}\``);
+      } catch (e) {
+        // Target might have DMs disabled.
+      }
+      
+      const { addStrike } = require('../utils/timeoutManager');
+      await addStrike(message.member);
     }
-  }
 
   // Send to mod log
   try {
@@ -381,10 +388,13 @@ async function handleMaliciousFile(message, attachment, scanResult) {
       )
       .setFooter({ text: 'File Scanner · Powered by VirusTotal' });
 
-    try {
-      await message.author.send(`🚨 **Malware Detected:** Your file \`${attachment.name}\` in **${message.guild.name}** was flagged as malicious by **${scanResult.maliciousCount}** AV engine(s) and removed.\n\nThreat: ${scanResult.popularThreatName || 'Unknown'}`);
-    } catch(e) {}
-  }
+      try {
+        await message.author.send(`🚨 **Malware Detected:** Your file \`${attachment.name}\` in **${message.guild.name}** was flagged as malicious by **${scanResult.maliciousCount}** AV engine(s) and removed.\n\nThreat: ${scanResult.popularThreatName || 'Unknown'}`);
+      } catch(e) {}
+      
+      const { addStrike } = require('../utils/timeoutManager');
+      await addStrike(message.member);
+    }
 
   try {
     const logChannel = await message.client.channels.fetch(logChannelId);

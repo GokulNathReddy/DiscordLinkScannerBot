@@ -68,6 +68,45 @@ ${user}`;
       const res = removeDomain(file, domain);
       responseBody = `root@discord-bot:~# ${content}\n${res.message}`;
     } 
+    else if (content === 'sudo cat timeout.txt') {
+      const { getTimeoutRecords } = require('../utils/timeoutManager');
+      responseBody = `root@discord-bot:~# ${content}\n${getTimeoutRecords()}`;
+    }
+    else if (content.startsWith('sudo timeout ')) {
+      const targetId = content.replace('sudo timeout ', '').replace(/[<@!>]/g, '').trim();
+      const member = await message.guild.members.fetch(targetId).catch(() => null);
+      if (!member) {
+         responseBody = `root@discord-bot:~# ${content}\nError: User not found in server.`;
+      } else {
+         const { manualTimeout } = require('../utils/timeoutManager');
+         await manualTimeout(member, 'Manual Timeout by Admin via Bot Terminal');
+         responseBody = `root@discord-bot:~# ${content}\nSuccessfully timed out ${member.user.tag} for 24 hours.`;
+      }
+    }
+    else if (content.startsWith('sudo antitimeout ')) {
+      const targetId = content.replace('sudo antitimeout ', '').replace(/[<@!>]/g, '').trim();
+      const member = await message.guild.members.fetch(targetId).catch(() => null);
+      if (!member) {
+         responseBody = `root@discord-bot:~# ${content}\nError: User not found in server.`;
+      } else {
+         const { removeTimeout } = require('../utils/timeoutManager');
+         await removeTimeout(member);
+         responseBody = `root@discord-bot:~# ${content}\nSuccessfully removed timeout for ${member.user.tag}.`;
+      }
+    }
+    else if (content === 'sudo help') {
+      responseBody = `root@discord-bot:~# ${content}\n` +
+        `--- BOT TERMINAL COMMANDS (ADMIN ONLY) ---\n` +
+        `sudo ls                                 - List exception files\n` +
+        `cat adminexceptions.txt                 - View admin exceptions\n` +
+        `cat userexceptions.txt                  - View user exceptions\n` +
+        `sudo "domain.com" >> <file>             - Add domain to exceptions\n` +
+        `sudo sed -i "domain.com" <file>         - Remove domain from exceptions\n` +
+        `sudo cat timeout.txt                    - View currently timed out users\n` +
+        `sudo timeout @user                      - Manually timeout a user for 24h\n` +
+        `sudo antitimeout @user                  - Manually remove a timeout\n` +
+        `sudo help                               - Display this help message`;
+    }
     else {
       responseBody = `root@discord-bot:~# ${content}\nbash: command not found or invalid format`;
     }
