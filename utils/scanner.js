@@ -1,182 +1,126 @@
 // ============================================================
-//  utils/scanner.js  —  Combined scanning pipeline
-//  SDP → (IPQS || VT) parallel fallback logic
+//  utils/scanner.js  —  Combined URL scanning pipeline
+//  SDP (local) → cache → liveness + IPQS + VT (all parallel)
 // ============================================================
 
-const stopPhishing = require('stop-discord-phishing');
-const { EmbedBuilder } = require('discord.js');
-const { checkUrl: checkIpqs } = require('../apis/ipqualityscore');
+const stopPhishing              = require('stop-discord-phishing');
+const axios                     = require('axios');
+const { checkUrl: checkIpqs }   = require('../apis/ipqualityscore');
 const { checkUrl: checkVt, VtRateLimitError } = require('../apis/virustotal');
-const cache = require('./cache');
-const { config } = require('../config'); // used for checking enablement in lower levels but we can check here too.
-
-/**
- * @typedef {Object} ScanResult
- * @property {boolean} safe          - True if passed all checks
- * @property {string|null} reason    - 'stop-discord-phishing', 'ipqs', or 'virustotal' if failed
- * @property {string|null} note      - Optional context like "VirusTotal Unavailable"
- * @property {number|null} ipqsScore - The IPQS risk score (if available)
- * @property {number|null} vtMalicious - The VT malicious count (if available)
- * @property {string|null} apiErrorContext - String detailing which APIs failed if any
- */
+const cache                     = require('./cache');
 
 /**
  * Run a URL through the full security pipeline.
  *
- * 1. stop-discord-phishing (Local, Instant)
- *    ↓ passes?
- * 2. Cache hit?
- *    ↓ misses?
- * 3. Promise.all( IPQS, VirusTotal )
+ *  1. stop-discord-phishing   (local, instant, free)
+ *  2. URL cache hit?          (local, instant, free)
+ *  3. Liveness + IPQS + VT   (all three fire in parallel — no sequential wait)
  *
  * @param {string} url
+ * @param {Function} updateStatus
  * @returns {Promise<ScanResult>}
  */
-async function scanPipeline(url, updateStatus = async () => {}) {
-  // --- 1. LOCAL CHECK (stop-discord-phishing) ---
-  await updateStatus('Cross-referencing phishing blocklists...');
+async function scanPipeline(url, updateStatus = () => {}) {
+
+  // ── 1. Local phishing blocklist (instant) ──────────────────
+  updateStatus('Cross-referencing phishing blocklists...');
   const isSpam = await stopPhishing.checkMessage(url, true);
   if (isSpam) {
-    return {
-      safe: false,
-      reason: 'stop-discord-phishing',
-      note: null,
-      ipqsScore: null,
-      vtMalicious: null,
-      apiErrorContext: null
-    };
+    return { safe: false, reason: 'stop-discord-phishing', note: null, ipqsScore: null, vtMalicious: null, apiErrorContext: null };
   }
 
-  // --- 2. CACHE ---
+  // ── 2. Cache lookup ────────────────────────────────────────
   const cached = cache.get(url);
   if (cached) {
-    await updateStatus('Cache hit — retrieving prior scan results...');
+    updateStatus('Cache hit — retrieving prior scan results...');
     return cached;
   }
 
-  // --- 2.5 LIVENESS / DEAD LINK CHECK ---
-  await updateStatus('Resolving domain & checking link reachability...');
-  try {
-    const axios = require('axios');
-    const res = await axios.head(url, { 
-      timeout: 5000, 
-      maxRedirects: 3,
-      validateStatus: () => true
-    });
-    
-    if (res.status === 404) {
-      return {
-        safe: false,
-        reason: 'Dead Link (404 Not Found)',
-        note: null,
-        ipqsScore: null,
-        vtMalicious: null,
-        apiErrorContext: null
-      };
-    }
-  } catch (err) {
-    return {
-      safe: false,
-      reason: 'Invalid or Unreachable Domain',
-      note: null,
-      ipqsScore: null,
-      vtMalicious: null,
-      apiErrorContext: null
-    };
+  // ── 3. Liveness check + IPQS + VT — all in parallel ───────
+  // Firing all three together means a slow liveness check never delays
+  // the API responses, and a fast liveness failure short-circuits cheaply.
+  updateStatus('Resolving domain & querying threat intelligence engines...');
+
+  const livenessPromise = axios.head(url, {
+    timeout: 5000,
+    maxRedirects: 3,
+    validateStatus: () => true,  // never throw on HTTP status
+  }).catch(e => e); // network errors become Error objects
+
+  const ipqsPromise = checkIpqs(url).catch(e => e);
+  const vtPromise   = checkVt(url).catch(e => e);
+
+  // Live status feedback as each API comes back (fire-and-forget)
+  ipqsPromise.then(r => { if (!(r instanceof Error)) updateStatus('IPQualityScore responded — awaiting VirusTotal...'); }).catch(() => {});
+  vtPromise.then(r   => { if (!(r instanceof Error)) updateStatus('VirusTotal responded — analysing threat report...'); }).catch(() => {});
+
+  const [livenessRes, ipqsRes, vtRes] = await Promise.all([livenessPromise, ipqsPromise, vtPromise]);
+
+  // ── Evaluate liveness ─────────────────────────────────────
+  if (livenessRes instanceof Error) {
+    return { safe: false, reason: 'Invalid or Unreachable Domain', note: null, ipqsScore: null, vtMalicious: null, apiErrorContext: null };
+  }
+  if (livenessRes.status === 404) {
+    return { safe: false, reason: 'Dead Link (404 Not Found)', note: null, ipqsScore: null, vtMalicious: null, apiErrorContext: null };
   }
 
-  // --- 3. Parallel API Execution (IPQS + VT) ---
-  await updateStatus('Querying IPQualityScore & VirusTotal engines...');
-  let ipqsPromise = checkIpqs(url).catch(e => e);
-  let vtPromise   = checkVt(url).catch(e => e);
-
-  // Fire status updates as each API resolves
-  ipqsPromise.then(r => {
-    if (!(r instanceof Error)) updateStatus('IPQualityScore responded — awaiting VirusTotal...');
-  }).catch(() => {});
-
-  vtPromise.then(r => {
-    if (!(r instanceof Error)) updateStatus('VirusTotal responded — analysing threat report...');
-  }).catch(() => {});
-
-  const [ipqsRes, vtRes] = await Promise.all([ipqsPromise, vtPromise]);
-  await updateStatus('Compiling threat intelligence report...');
+  // ── Evaluate API results ──────────────────────────────────
+  updateStatus('Compiling threat intelligence report...');
 
   const ipqsSuccess = !(ipqsRes instanceof Error);
-  const vtSuccess   = !(vtRes instanceof Error);
+  const vtSuccess   = !(vtRes   instanceof Error);
 
-  const resultTemplate = {
+  const result = {
     safe: true,
     reason: null,
     note: null,
-    ipqsScore: ipqsSuccess ? ipqsRes.riskScore : null,
-    vtMalicious: vtSuccess ? vtRes.maliciousCount : null,
-    apiErrorContext: null
+    ipqsScore:      ipqsSuccess ? ipqsRes.riskScore      : null,
+    vtMalicious:    vtSuccess   ? vtRes.maliciousCount   : null,
+    apiErrorContext: null,
   };
 
-  // Scenario A: Both failed!
+  // Both APIs failed — block for safety, do not cache
   if (!ipqsSuccess && !vtSuccess) {
-    const errorMsg = `Both IPQS and VirusTotal failed. IPQS: ${ipqsRes.message} | VT: ${vtRes.message}`;
-    console.error(`[scanner] Both failed for ${url}:`, errorMsg);
-    resultTemplate.safe = false;
-    resultTemplate.reason = 'API_FAILURE_BOTH';
-    resultTemplate.note = 'Both APIs down or rate limited.';
-    resultTemplate.apiErrorContext = 'VirusTotal, IPQualityScore';
-    return resultTemplate; // Don't cache complete failures.
+    console.error(`[scanner] Both APIs failed for ${url}: IPQS=${ipqsRes.message} | VT=${vtRes.message}`);
+    return { ...result, safe: false, reason: 'API_FAILURE_BOTH', note: 'Both APIs down or rate limited.', apiErrorContext: 'VirusTotal, IPQualityScore' };
   }
 
-  // Scenario B: One failed
   if (!ipqsSuccess) {
     console.warn(`[scanner] IPQS failed for ${url}:`, ipqsRes.message);
-    resultTemplate.apiErrorContext = 'IPQualityScore';
-    resultTemplate.note = 'IPQualityScore unavailable — VirusTotal only.';
+    result.apiErrorContext = 'IPQualityScore';
+    result.note = 'IPQualityScore unavailable — VirusTotal only.';
   }
   if (!vtSuccess) {
     console.warn(`[scanner] VT failed for ${url}:`, vtRes.message);
-    resultTemplate.apiErrorContext = 'VirusTotal';
-    // If it was a 429 rate limit, make it explicit.
-    if (vtRes instanceof VtRateLimitError) {
-      resultTemplate.note = 'VirusTotal unavailable (Rate Limited) — IPQualityScore only.';
-    } else {
-      resultTemplate.note = 'VirusTotal unavailable — IPQualityScore only.';
-    }
+    result.apiErrorContext = 'VirusTotal';
+    result.note = vtRes instanceof VtRateLimitError
+      ? 'VirusTotal unavailable (Rate Limited) — IPQualityScore only.'
+      : 'VirusTotal unavailable — IPQualityScore only.';
   }
 
-  // Final evaluation logic
-  // Assume safe initially. If ANY successful API flagged it, mark malicious.
-  resultTemplate.safe = true; 
-
+  // Evaluate threat flags from each successful API
   if (ipqsSuccess) {
     if (!ipqsRes.safe) {
-      resultTemplate.safe = false;
-      resultTemplate.reason = 'IPQualityScore';
-    } else if (ipqsRes.raw && ipqsRes.raw.adult === true) {
-      resultTemplate.safe = false;
-      resultTemplate.reason = 'Adult/NSFW Content';
+      result.safe = false; result.reason = 'IPQualityScore';
+    } else if (ipqsRes.raw?.adult === true) {
+      result.safe = false; result.reason = 'Adult/NSFW Content';
     }
-  } 
-  
-  if (resultTemplate.safe && vtSuccess) {
+  }
+  if (result.safe && vtSuccess) {
     if (!vtRes.safe) {
-      resultTemplate.safe = false;
-      resultTemplate.reason = 'VirusTotal';
-    } else if (vtRes.raw && vtRes.raw.attributes && vtRes.raw.attributes.categories) {
-      // Extract all category values from VT's massive dataset
-      const categoriesStr = Object.values(vtRes.raw.attributes.categories).join(' ').toLowerCase();
-      const adultKeywords = ['adult', 'porn', 'sexually explicit', 'sex', 'x-rated', 'erotica', 'nsfw'];
-      
-      const isAdult = adultKeywords.some(kw => categoriesStr.includes(kw));
-      if (isAdult) {
-        resultTemplate.safe = false;
-        resultTemplate.reason = 'Adult/NSFW Content';
+      result.safe = false; result.reason = 'VirusTotal';
+    } else if (vtRes.raw?.attributes?.categories) {
+      const cats = Object.values(vtRes.raw.attributes.categories).join(' ').toLowerCase();
+      const adultKw = ['adult','porn','sexually explicit','sex','x-rated','erotica','nsfw'];
+      if (adultKw.some(kw => cats.includes(kw))) {
+        result.safe = false; result.reason = 'Adult/NSFW Content';
       }
     }
   }
 
-  // Only cache if the URL is resolved securely (i.e. we got a definitive answer).
-  // Don't cache API errors. We consider partial failures (one API) cacheable.
-  cache.set(url, resultTemplate);
-  return resultTemplate;
+  // Cache definitive results (not API failures)
+  cache.set(url, result);
+  return result;
 }
 
 module.exports = { scanPipeline };
