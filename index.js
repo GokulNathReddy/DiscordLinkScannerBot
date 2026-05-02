@@ -7,6 +7,10 @@ const { config } = require('./config');
 const { handleMessage } = require('./handlers/messageHandler');
 const { handleCommand } = require('./handlers/commandHandler');
 
+// URL regex (mirrors the one in messageHandler — used to detect edit-injected links)
+const URL_REGEX = /(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})/gi;
+const INVITE_REGEX = /(?:https?:\/\/)?(?:www\.)?(?:discord\.gg\/|discord\.com\/invite\/|discordapp\.com\/invite\/)([a-zA-Z0-9-]+)/i;
+
 // Require module exports from config directly where needed to prevent circular dependencies
 const configData = require('./config');
 
@@ -50,6 +54,43 @@ client.on('messageCreate', async (message) => {
   if (!handled) {
     await handleMessage(message);
   }
+});
+
+// ── EDITED MESSAGE SCANNING ──────────────────────────────────────────────────
+// Catches the trick of posting plain text then editing in a malicious link.
+client.on('messageUpdate', async (oldMessage, newMessage) => {
+  // Ignore bot/webhook edits
+  if (!newMessage || newMessage.author?.bot || newMessage.webhookId) return;
+
+  // Fetch the full message object if it was a partial (e.g. cached before bot started)
+  try {
+    if (newMessage.partial) newMessage = await newMessage.fetch();
+    if (oldMessage.partial) oldMessage = await oldMessage.fetch();
+  } catch (err) {
+    console.error('[messageUpdate] Could not fetch partial message:', err.message);
+    return;
+  }
+
+  const oldContent  = oldMessage.content  || '';
+  const newContent  = newMessage.content  || '';
+
+  // Nothing changed in text? Skip.
+  if (oldContent === newContent) return;
+
+  // Check if the *edited* message now contains URLs or Discord invites
+  const newUrls     = newContent.match(URL_REGEX)    || [];
+  const oldUrls     = oldContent.match(URL_REGEX)    || [];
+  const hasNewInvite = INVITE_REGEX.test(newContent) && !INVITE_REGEX.test(oldContent);
+
+  // Detect any URL present in the new version that wasn't in the old version
+  const brandNewUrls = newUrls.filter(u => !oldUrls.includes(u));
+
+  if (brandNewUrls.length === 0 && !hasNewInvite) return; // No new links introduced
+
+  console.log(`[messageUpdate] Detected ${brandNewUrls.length} new link(s) injected via edit from ${newMessage.author.tag}`);
+
+  // Re-use the exact same scanning + deletion logic as messageCreate
+  await handleMessage(newMessage);
 });
 
 // Avoid crashes on unhandled rejections
