@@ -15,3 +15,4 @@ c.tenor.com
 klipy.com
 media.klipy.com
 cdn.klipy.com
+media.discordapp.net
