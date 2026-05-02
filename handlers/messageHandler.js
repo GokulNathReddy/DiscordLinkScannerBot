@@ -39,6 +39,20 @@ async function handleMessage(message) {
     if (!isAdmin) {
       if (message.deletable) await message.delete().catch(() => {});
 
+      // ── Public channel notice (auto-deletes after 10 s) ──
+      const inviteNotice = new EmbedBuilder()
+        .setColor('#ffae42')
+        .setTitle('🚫 Message Removed')
+        .setDescription(`${message.author}, your message was removed.`)
+        .addFields(
+          { name: '❓ Reason', value: 'Discord server invite links are **not allowed** here.' },
+        )
+        .setFooter({ text: 'This notice will disappear in 10 seconds.' })
+        .setTimestamp();
+      message.channel.send({ embeds: [inviteNotice] })
+        .then(m => setTimeout(() => m.delete().catch(() => {}), 10_000))
+        .catch(() => {});
+
       // DM the user (best-effort)
       message.author.send('🚨 **Warning:** Promotional Discord server links and invites are not allowed in this server.').catch(() => {});
 
@@ -218,10 +232,24 @@ async function handleMessage(message) {
 
 // ── Malicious URL handler ─────────────────────────────────────
 async function handleMaliciousOrFailedUrl(message, url, res) {
-  const embed = new EmbedBuilder().setTimestamp();
+  const modEmbed = new EmbedBuilder().setTimestamp();
 
   if (res.reason === 'API_FAILURE_BOTH') {
-    embed
+    // ── Public channel notice ──
+    const notice = new EmbedBuilder()
+      .setColor('#ff9900')
+      .setTitle('⚠️ Message Removed — Scanner Unavailable')
+      .setDescription(`${message.author}, your message was removed.`)
+      .addFields(
+        { name: '❓ Reason', value: 'Our security scanners are temporarily unavailable. Unverified links are blocked for safety. Please try again later.' },
+      )
+      .setFooter({ text: 'This notice will disappear in 10 seconds.' })
+      .setTimestamp();
+    message.channel.send({ embeds: [notice] })
+      .then(m => setTimeout(() => m.delete().catch(() => {}), 10_000))
+      .catch(() => {});
+
+    modEmbed
       .setColor('#ff9900')
       .setTitle('⚠️ UNVERIFIED — API Failure')
       .setDescription(`**Mods: Please review this link manually.**\nReason: ${res.note} — link blocked for safety`)
@@ -233,47 +261,78 @@ async function handleMaliciousOrFailedUrl(message, url, res) {
     message.author.send(
       `⚠️ Your message in **${message.guild.name}** was removed because our security scanners (${res.apiErrorContext || 'Unknown'}) are currently down or rate-limited. Please try again later!`
     ).catch(() => {});
+
   } else {
-    embed
+    // ── Public channel notice ──
+    const flaggedBy = res.reason || 'Unknown scanner';
+    const notice = new EmbedBuilder()
+      .setColor('#ff0000')
+      .setTitle('🚨 Message Removed — Malicious Link Detected')
+      .setDescription(`${message.author}, your message was removed.`)
+      .addFields(
+        { name: '❓ Reason',     value: `This link was flagged as **malicious** by our security scanners.` },
+        { name: '🔍 Flagged by', value: flaggedBy },
+      )
+      .setFooter({ text: 'This notice will disappear in 10 seconds.' })
+      .setTimestamp();
+    message.channel.send({ embeds: [notice] })
+      .then(m => setTimeout(() => m.delete().catch(() => {}), 10_000))
+      .catch(() => {});
+
+    modEmbed
       .setColor('#ff0000')
       .setTitle('🚨 Link Blocked')
       .addFields(
         { name: 'User',       value: `${message.author} (ID: ${message.author.id})` },
         { name: 'URL',        value: `\`${url}\`` },
-        { name: 'Flagged by', value: res.reason || 'Unknown scanner' },
+        { name: 'Flagged by', value: flaggedBy },
       );
-    if (res.ipqsScore  !== null) embed.addFields({ name: 'IPQS Risk Score',     value: `${res.ipqsScore}`,  inline: true });
-    if (res.vtMalicious !== null) embed.addFields({ name: 'VT Malicious Count', value: `${res.vtMalicious}`, inline: true });
+    if (res.ipqsScore   !== null) modEmbed.addFields({ name: 'IPQS Risk Score',    value: `${res.ipqsScore}`,   inline: true });
+    if (res.vtMalicious !== null) modEmbed.addFields({ name: 'VT Malicious Count', value: `${res.vtMalicious}`, inline: true });
 
     message.author.send(
-      `🚨 **Warning:** Your message in **${message.guild.name}** was removed and flagged as malicious.\n\nFlagged by: ${res.reason}\nURL: \`${url}\``
+      `🚨 **Warning:** Your message in **${message.guild.name}** was removed and flagged as malicious.\n\nFlagged by: ${flaggedBy}\nURL: \`${url}\``
     ).catch(() => {});
 
     await addStrike(message.member);
   }
 
   const logChannel = await fetchLogChannel(message.client);
-  if (logChannel) logChannel.send({ embeds: [embed] }).catch(() => {});
+  if (logChannel) logChannel.send({ embeds: [modEmbed] }).catch(() => {});
 }
 
 // ── Malicious file handler ────────────────────────────────────
 async function handleMaliciousFile(message, attachment, scanResult, logChannel) {
   const fileSizeKB = (attachment.size / 1024).toFixed(1);
   const fileExt    = (attachment.name || '').split('.').pop().toUpperCase() || 'UNKNOWN';
-  const embed      = new EmbedBuilder().setTimestamp();
+  const modEmbed   = new EmbedBuilder().setTimestamp();
 
   if (scanResult.method === 'error') {
-    embed
+    // ── Public channel notice ──
+    const notice = new EmbedBuilder()
+      .setColor('#ff9900')
+      .setTitle('⚠️ Message Removed — Scanner Error')
+      .setDescription(`${message.author}, your file was removed.`)
+      .addFields(
+        { name: '❓ Reason', value: `Our malware scanner encountered an error while checking \`${attachment.name}\`. Files are blocked when they cannot be verified. Please try again later or contact a mod.` },
+      )
+      .setFooter({ text: 'This notice will disappear in 10 seconds.' })
+      .setTimestamp();
+    message.channel.send({ embeds: [notice] })
+      .then(m => setTimeout(() => m.delete().catch(() => {}), 10_000))
+      .catch(() => {});
+
+    modEmbed
       .setColor('#ff9900')
       .setTitle('⚠️ FILE UNVERIFIED — Scanner Error')
       .setDescription('File blocked for safety due to scanner failure. **Mods: please review manually.**')
       .addFields(
-        { name: '👤 User',        value: `${message.author} (${message.author.tag})\nID: \`${message.author.id}\``, inline: true },
-        { name: '📁 File',        value: `\`${attachment.name}\`\n${fileSizeKB} KB · \`${fileExt}\``, inline: true },
+        { name: '👤 User',         value: `${message.author} (${message.author.tag})\nID: \`${message.author.id}\``, inline: true },
+        { name: '📁 File',         value: `\`${attachment.name}\`\n${fileSizeKB} KB · \`${fileExt}\``, inline: true },
         { name: '🔗 Original URL', value: `[View File](${attachment.url})` },
-        { name: '❌ Error',        value: `\`\`\`${scanResult.error || 'Unknown error'}\`\`\`` },
-        { name: '📍 Channel',     value: `<#${message.channelId}>`, inline: true },
-        { name: '🕐 Time',        value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
+        { name: '❌ Error',         value: `\`\`\`${scanResult.error || 'Unknown error'}\`\`\`` },
+        { name: '📍 Channel',      value: `<#${message.channelId}>`, inline: true },
+        { name: '🕐 Time',         value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
       )
       .setFooter({ text: 'File Scanner · Error' });
     message.author.send(
@@ -281,13 +340,29 @@ async function handleMaliciousFile(message, attachment, scanResult, logChannel) 
     ).catch(() => {});
 
   } else {
-    const threatLabel  = scanResult.popularThreatName
+    const threatLabel = scanResult.popularThreatName
       ? `**${scanResult.popularThreatName}**`
       : `Unknown (${scanResult.maliciousCount} engine${scanResult.maliciousCount !== 1 ? 's' : ''} flagged)`;
-    const threatNames  = scanResult.threatNames?.length ? scanResult.threatNames.map(n => `\`${n}\``).join('\n') : '`N/A`';
-    const threatTypes  = scanResult.threatTypes?.length ? scanResult.threatTypes.map(t => `\`${t}\``).join(', ') : '`N/A`';
+    const threatNames = scanResult.threatNames?.length ? scanResult.threatNames.map(n => `\`${n}\``).join('\n') : '`N/A`';
+    const threatTypes = scanResult.threatTypes?.length ? scanResult.threatTypes.map(t => `\`${t}\``).join(', ') : '`N/A`';
 
-    embed
+    // ── Public channel notice ──
+    const notice = new EmbedBuilder()
+      .setColor('#ff0000')
+      .setTitle('🚨 Message Removed — Malicious File Detected')
+      .setDescription(`${message.author}, your file was removed.`)
+      .addFields(
+        { name: '❓ Reason',              value: `\`${attachment.name}\` was flagged as **malicious** by our security scanners.` },
+        { name: '🦠 Threat',             value: threatLabel },
+        { name: '📊 Engines that flagged', value: `${scanResult.maliciousCount} AV engine(s)` },
+      )
+      .setFooter({ text: 'This notice will disappear in 10 seconds.' })
+      .setTimestamp();
+    message.channel.send({ embeds: [notice] })
+      .then(m => setTimeout(() => m.delete().catch(() => {}), 10_000))
+      .catch(() => {});
+
+    modEmbed
       .setColor('#ff0000')
       .setTitle('🚨 MALICIOUS FILE BLOCKED')
       .setDescription(`A file uploaded by ${message.author} has been flagged as **malicious** and blocked.`)
@@ -315,7 +390,7 @@ async function handleMaliciousFile(message, attachment, scanResult, logChannel) 
   }
 
   const ch = logChannel || await fetchLogChannel(message.client);
-  if (ch) ch.send({ embeds: [embed] }).catch(() => {});
+  if (ch) ch.send({ embeds: [modEmbed] }).catch(() => {});
 }
 
 module.exports = { handleMessage };
