@@ -129,13 +129,25 @@ ${user}`;
     }
     else if (content === 'sudo neofetch') {
       const os = require('os');
-      const uptime = process.uptime();
-      const days = Math.floor(uptime / 86400);
-      const hours = Math.floor(uptime / 3600) % 24;
-      const minutes = Math.floor(uptime / 60) % 60;
-      const uptimeStr = `${days}d ${hours}h ${minutes}m`;
-      const memoryTotal = (os.totalmem() / 1024 / 1024 / 1024).toFixed(2);
-      const memoryUsed = ((os.totalmem() - os.freemem()) / 1024 / 1024 / 1024).toFixed(2);
+      const djsVersion = require('discord.js').version;
+      
+      const formatUptime = (seconds) => {
+         const d = Math.floor(seconds / 86400);
+         const h = Math.floor(seconds / 3600) % 24;
+         const m = Math.floor(seconds / 60) % 60;
+         const s = Math.floor(seconds % 60);
+         return `${d}d ${h}h ${m}m ${s}s`;
+      };
+
+      const sysUptimeStr = formatUptime(os.uptime());
+      const botUptimeStr = formatUptime(process.uptime());
+      
+      const sysMemoryTotal = (os.totalmem() / 1024 / 1024 / 1024).toFixed(2);
+      const sysMemoryUsed = ((os.totalmem() - os.freemem()) / 1024 / 1024 / 1024).toFixed(2);
+      const botMemoryUsed = (process.memoryUsage().rss / 1024 / 1024).toFixed(2);
+      
+      const cpuModel = os.cpus()[0].model.trim();
+      const cpuCores = os.cpus().length;
       
       const ping = message.client.ws.ping;
       const guild = message.guild;
@@ -148,10 +160,15 @@ ${user}`;
 `       .---.       root@${os.hostname()}
       /     \\      -------------------------
      | () () |     OS: ${os.type()} ${os.release()} ${os.arch()}
-      \\  ^  /      Uptime: ${uptimeStr}
-       |||||       Node.js: ${process.version}
-       |||||       Memory: ${memoryUsed}GiB / ${memoryTotal}GiB
-                   CPU: ${os.cpus()[0].model.trim()}
+      \\  ^  /      Uptime (System): ${sysUptimeStr}
+       |||||       Uptime (Bot): ${botUptimeStr}
+       |||||       CPU: ${cpuModel} (${cpuCores} Cores)
+                   Memory (System): ${sysMemoryUsed}GiB / ${sysMemoryTotal}GiB
+                   Memory (Bot Usage): ${botMemoryUsed}MiB
+                   
+                   --- SOFTWARE ---
+                   Node.js: ${process.version}
+                   Discord.js: v${djsVersion}
                    
                    --- DISCORD STATS ---
                    Server: ${serverName}
