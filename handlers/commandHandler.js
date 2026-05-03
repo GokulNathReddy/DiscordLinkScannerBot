@@ -137,6 +137,13 @@ ${user}`;
       const memoryTotal = (os.totalmem() / 1024 / 1024 / 1024).toFixed(2);
       const memoryUsed = ((os.totalmem() - os.freemem()) / 1024 / 1024 / 1024).toFixed(2);
       
+      const ping = message.client.ws.ping;
+      const guild = message.guild;
+      const members = guild ? guild.memberCount : 0;
+      const channels = guild ? guild.channels.cache.size : 0;
+      const roles = guild ? guild.roles.cache.size : 0;
+      const serverName = guild ? guild.name : 'Unknown';
+      
       responseBody = `root@discord-bot:~# ${content}\n` +
 `       .---.       root@${os.hostname()}
       /     \\      -------------------------
@@ -144,7 +151,14 @@ ${user}`;
       \\  ^  /      Uptime: ${uptimeStr}
        |||||       Node.js: ${process.version}
        |||||       Memory: ${memoryUsed}GiB / ${memoryTotal}GiB
-                   CPU: ${os.cpus()[0].model.trim()}`;
+                   CPU: ${os.cpus()[0].model.trim()}
+                   
+                   --- DISCORD STATS ---
+                   Server: ${serverName}
+                   Members: ${members}
+                   Channels: ${channels}
+                   Roles: ${roles}
+                   Bot Latency: ${ping}ms`;
     }
     else if (content === 'sudo help') {
       responseBody = `root@discord-bot:~# ${content}\n` +
