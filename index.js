@@ -59,7 +59,7 @@ client.on('messageCreate', async (message) => {
   if (content.toLowerCase().startsWith('kadala afk')) {
     const afkMsg = content.slice(10).trim() || 'AFK';
     afkUsers.set(message.author.id, { message: afkMsg, timestamp: Date.now() });
-    await message.reply('poituva nanbaa');
+    await message.reply(`poituva nanba afk set panten ${afkMsg}`);
     return;
   }
 
