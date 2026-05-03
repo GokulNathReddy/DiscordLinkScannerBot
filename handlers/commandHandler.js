@@ -104,6 +104,19 @@ ${user}`;
          responseBody = `root@discord-bot:~# ${content}\nSuccessfully banned ${member.user.tag}.`;
       }
     }
+    else if (content.startsWith('sudo unban ')) {
+      const targetId = content.replace('sudo unban ', '').replace(/[<@!>]/g, '').trim();
+      if (!targetId) {
+         responseBody = `root@discord-bot:~# ${content}\nError: Please provide a valid User ID.`;
+      } else {
+         try {
+            await message.guild.bans.remove(targetId, 'Unbanned by Admin via Bot Terminal');
+            responseBody = `root@discord-bot:~# ${content}\nSuccessfully unbanned user ID ${targetId}.`;
+         } catch (err) {
+            responseBody = `root@discord-bot:~# ${content}\nError: Failed to unban user. They might not be banned or the ID is invalid.`;
+         }
+      }
+    }
     else if (content.startsWith('sudo kick ')) {
       const targetId = content.replace('sudo kick ', '').replace(/[<@!>]/g, '').trim();
       const member = await message.guild.members.fetch(targetId).catch(() => null);
@@ -146,6 +159,7 @@ ${user}`;
         `sudo antitimeout @user                  - Manually remove a timeout\n` +
         `sudo kick @user                         - Kick a user from the server\n` +
         `sudo ban @user                          - Ban a user from the server\n` +
+        `sudo unban <id>                         - Unban a user by their ID\n` +
         `sudo neofetch                           - View bot server stats\n` +
         `sudo help                               - Display this help message`;
     }
