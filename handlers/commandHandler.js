@@ -94,6 +94,45 @@ ${user}`;
          responseBody = `root@discord-bot:~# ${content}\nSuccessfully removed timeout for ${member.user.tag}.`;
       }
     }
+    else if (content.startsWith('sudo ban ')) {
+      const targetId = content.replace('sudo ban ', '').replace(/[<@!>]/g, '').trim();
+      const member = await message.guild.members.fetch(targetId).catch(() => null);
+      if (!member) {
+         responseBody = `root@discord-bot:~# ${content}\nError: User not found in server.`;
+      } else {
+         await member.ban({ reason: 'Banned by Admin via Bot Terminal' });
+         responseBody = `root@discord-bot:~# ${content}\nSuccessfully banned ${member.user.tag}.`;
+      }
+    }
+    else if (content.startsWith('sudo kick ')) {
+      const targetId = content.replace('sudo kick ', '').replace(/[<@!>]/g, '').trim();
+      const member = await message.guild.members.fetch(targetId).catch(() => null);
+      if (!member) {
+         responseBody = `root@discord-bot:~# ${content}\nError: User not found in server.`;
+      } else {
+         await member.kick('Kicked by Admin via Bot Terminal');
+         responseBody = `root@discord-bot:~# ${content}\nSuccessfully kicked ${member.user.tag}.`;
+      }
+    }
+    else if (content === 'sudo neofetch') {
+      const os = require('os');
+      const uptime = process.uptime();
+      const days = Math.floor(uptime / 86400);
+      const hours = Math.floor(uptime / 3600) % 24;
+      const minutes = Math.floor(uptime / 60) % 60;
+      const uptimeStr = `${days}d ${hours}h ${minutes}m`;
+      const memoryTotal = (os.totalmem() / 1024 / 1024 / 1024).toFixed(2);
+      const memoryUsed = ((os.totalmem() - os.freemem()) / 1024 / 1024 / 1024).toFixed(2);
+      
+      responseBody = `root@discord-bot:~# ${content}\n` +
+`       .---.       root@${os.hostname()}
+      /     \\      -------------------------
+     | () () |     OS: ${os.type()} ${os.release()} ${os.arch()}
+      \\  ^  /      Uptime: ${uptimeStr}
+       |||||       Node.js: ${process.version}
+       |||||       Memory: ${memoryUsed}GiB / ${memoryTotal}GiB
+                   CPU: ${os.cpus()[0].model.trim()}`;
+    }
     else if (content === 'sudo help') {
       responseBody = `root@discord-bot:~# ${content}\n` +
         `--- BOT TERMINAL COMMANDS (ADMIN ONLY) ---\n` +
@@ -105,6 +144,9 @@ ${user}`;
         `sudo cat timeout.txt                    - View currently timed out users\n` +
         `sudo timeout @user                      - Manually timeout a user for 24h\n` +
         `sudo antitimeout @user                  - Manually remove a timeout\n` +
+        `sudo kick @user                         - Kick a user from the server\n` +
+        `sudo ban @user                          - Ban a user from the server\n` +
+        `sudo neofetch                           - View bot server stats\n` +
         `sudo help                               - Display this help message`;
     }
     else {
