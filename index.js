@@ -46,7 +46,63 @@ client.once('ready', () => {
   }, 4000); 
 });
 
+// Temporary AFK Map
+const afkUsers = new Map();
+
 client.on('messageCreate', async (message) => {
+  if (message.author.bot || message.webhookId) return;
+
+  // --- TEMPORARY AFK LOGIC ---
+  const content = message.content.trim();
+
+  // 1. User sets AFK
+  if (content.toLowerCase().startsWith('kadala afk')) {
+    const afkMsg = content.slice(10).trim() || 'AFK';
+    afkUsers.set(message.author.id, { message: afkMsg, timestamp: Date.now() });
+    await message.reply('poituva nanbaa');
+    return;
+  }
+
+  // 2. User comes back
+  if (afkUsers.has(message.author.id)) {
+    const data = afkUsers.get(message.author.id);
+    const elapsed = Date.now() - data.timestamp;
+    
+    const seconds = Math.floor((elapsed / 1000) % 60);
+    const minutes = Math.floor((elapsed / (1000 * 60)) % 60);
+    const hours = Math.floor((elapsed / (1000 * 60 * 60)) % 24);
+    
+    let timeString = '';
+    if (hours > 0) timeString += `${hours}h `;
+    if (minutes > 0) timeString += `${minutes}m `;
+    timeString += `${seconds}s`;
+    
+    afkUsers.delete(message.author.id);
+    await message.reply(`Welcome back! You were gone for ${timeString.trim() || '0s'}.`);
+  }
+
+  // 3. User mentions someone who is AFK
+  if (message.mentions.users.size > 0) {
+    const mentionedAfkUsers = Array.from(message.mentions.users.values()).filter(u => afkUsers.has(u.id) && u.id !== message.author.id);
+    
+    for (const user of mentionedAfkUsers) {
+      const data = afkUsers.get(user.id);
+      const elapsed = Date.now() - data.timestamp;
+      
+      const seconds = Math.floor((elapsed / 1000) % 60);
+      const minutes = Math.floor((elapsed / (1000 * 60)) % 60);
+      const hours = Math.floor((elapsed / (1000 * 60 * 60)) % 24);
+      
+      let timeString = '';
+      if (hours > 0) timeString += `${hours}h `;
+      if (minutes > 0) timeString += `${minutes}m `;
+      timeString += `${seconds}s`;
+      
+      await message.reply(`${user.username} is currently AFK: ${data.message} (${timeString.trim() || '0s'} ago)`);
+    }
+  }
+  // --- END TEMPORARY AFK LOGIC ---
+
   // Try handle owner terminal commands first
   const handled = await handleCommand(message);
   
